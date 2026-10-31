@@ -385,3 +385,26 @@ class PromoCodeUsage(models.Model):
     def __str__(self):
         return f'{self.promo_code.code} — {self.parent.email}'
 
+class AccountDeletionVerification(models.Model):
+    """Одноразовый код подтверждения удаления родительского аккаунта."""
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='deletion_verification',
+        verbose_name='Родитель',
+    )
+    code_hash = models.CharField(max_length=128, verbose_name='Хеш кода')
+    expires_at = models.DateTimeField(db_index=True, verbose_name='Действует до')
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name='Ошибочных попыток')
+    sent_at = models.DateTimeField(verbose_name='Код отправлен')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Создано')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='Обновлено')
+
+    class Meta:
+        verbose_name = 'Код удаления аккаунта'
+        verbose_name_plural = 'Коды удаления аккаунтов'
+
+    def __str__(self):
+        return f'Удаление аккаунта: {self.user.email}'
+

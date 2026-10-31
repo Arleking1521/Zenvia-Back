@@ -267,6 +267,29 @@ class DeleteAccountSerializer(serializers.Serializer):
         return value
 
 
+class DeleteAccountRequestCodeSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
+class DeleteAccountConfirmCodeSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    code = serializers.RegexField(
+        regex=r'^\d{6}$',
+        required=True,
+        error_messages={
+            'invalid': 'Код должен состоять из 6 цифр.',
+            'required': 'Введите код подтверждения.',
+            'blank': 'Введите код подтверждения.',
+        },
+    )
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
 class ChildLanguageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Language

@@ -1,5 +1,6 @@
 from datetime import timedelta
 from django.test import TestCase
+from django.core import mail
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -22,6 +23,7 @@ from .models import (
     Subscription,
     TariffPlan,
     User,
+    AccountDeletionVerification,
 )
 
 
@@ -331,3 +333,72 @@ class AccountDeletionWebPageTests(TestCase):
         self.assertContains(response, 'Удаление аккаунта')
         self.assertContains(response, 'api/account/delete-account/')
         self.assertNotContains(response, 'user_id')
+
+class PublicAccountDeletionCodeTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='web-delete@example.com',
+            email='web-delete@example.com',
+            first_name='Web Parent',
+            password='ParentPass123!',
+        )
+        self.client = APIClient()
+
+    def _request_code(self):
+        return self.client.post(
+            '/api/account/delete-account/request-code/',
+            {'email': self.user.email},
+            format='json',
+        )
+
+    def _extract_code(self):
+        import re
+        match = re.search(r'\b(\d{6})\b', mail.outbox[-1].body)
+        self.assertIsNotNone(match)
+        return match.group(1)
+
+    def test_request_code_sends_email_and_stores_only_hash(self):
+        response = self._request_code()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [self.user.email])
+
+        code = self._extract_code()
+        verification = AccountDeletionVerification.objects.get(user=self.user)
+        self.assertNotEqual(verification.code_hash, code)
+        self.assertGreater(verification.expires_at, timezone.now())
+
+    def test_unknown_email_returns_same_generic_success(self):
+        response = self.client.post(
+            '/api/account/delete-account/request-code/',
+            {'email': 'missing@example.com'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertIn('Если аккаунт с таким email существует', response.data['detail'])
+
+    def test_correct_code_deletes_account(self):
+        self._request_code()
+        code = self._extract_code()
+
+        response = self.client.post(
+            '/api/account/delete-account/confirm-code/',
+            {'email': self.user.email, 'code': code},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(pk=self.user.pk).exists())
+
+    def test_wrong_code_does_not_delete_account(self):
+        self._request_code()
+        response = self.client.post(
+            '/api/account/delete-account/confirm-code/',
+            {'email': self.user.email, 'code': '000000'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(User.objects.filter(pk=self.user.pk).exists())
+        verification = AccountDeletionVerification.objects.get(user=self.user)
+        self.assertEqual(verification.attempts, 1)
+

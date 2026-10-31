@@ -152,11 +152,46 @@ LOCALE_PATHS = [os.path.join(BASE_DIR, 'locale')]
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
+# Django 6.1 MAILERS. Для разработки по умолчанию письмо выводится в
+# консоль. На production задайте MAILER_BACKEND=django.core.mail.backends.smtp.EmailBackend
+# и SMTP_* переменные в .env.
+MAILER_BACKEND = os.getenv(
+    'MAILER_BACKEND',
+    'django.core.mail.backends.console.EmailBackend',
+)
+
+_mailer_options = {}
+if MAILER_BACKEND == 'django.core.mail.backends.smtp.EmailBackend':
+    _mailer_options = {
+        'host': os.getenv('SMTP_HOST', ''),
+        'port': int(os.getenv('SMTP_PORT', '587')),
+        'username': os.getenv('SMTP_USERNAME', ''),
+        'password': os.getenv('SMTP_PASSWORD', ''),
+        'use_tls': os.getenv('SMTP_USE_TLS', 'True') == 'True',
+        'use_ssl': os.getenv('SMTP_USE_SSL', 'False') == 'True',
+        'timeout': int(os.getenv('SMTP_TIMEOUT', '15')),
+    }
+
 MAILERS = {
     'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+        'BACKEND': MAILER_BACKEND,
+        'OPTIONS': _mailer_options,
     },
 }
+DEFAULT_FROM_EMAIL = os.getenv(
+    'DEFAULT_FROM_EMAIL',
+    'Zenvia Kids <noreply@zenvia.kz>',
+)
+
+ACCOUNT_DELETION_CODE_TTL_MINUTES = int(
+    os.getenv('ACCOUNT_DELETION_CODE_TTL_MINUTES', '15')
+)
+ACCOUNT_DELETION_CODE_RESEND_SECONDS = int(
+    os.getenv('ACCOUNT_DELETION_CODE_RESEND_SECONDS', '60')
+)
+ACCOUNT_DELETION_CODE_MAX_ATTEMPTS = int(
+    os.getenv('ACCOUNT_DELETION_CODE_MAX_ATTEMPTS', '5')
+)
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -169,6 +204,11 @@ REST_FRAMEWORK = {
 
     'DEFAULT_SCHEMA_CLASS':
         'drf_spectacular.openapi.AutoSchema',
+
+    'DEFAULT_THROTTLE_RATES': {
+        'account_delete_request': '10/hour',
+        'account_delete_confirm': '30/hour',
+    },
 }
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

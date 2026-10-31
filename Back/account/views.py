@@ -1,8 +1,12 @@
 import logging
+import secrets
 from datetime import timedelta
 from uuid import uuid4
 
 from django.db import transaction
+from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
+from django.core.mail import send_mail
 from django.utils import timezone
 
 from rest_framework import status
@@ -10,12 +14,16 @@ from rest_framework.decorators import action
 from rest_framework.generics import CreateAPIView
 from rest_framework.mixins import CreateModelMixin, ListModelMixin, RetrieveModelMixin
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet, GenericViewSet
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User, Avatar, ChildProfile, TariffPlan, Subscription, PromoCodeUsage
+from .models import (
+    User, Avatar, ChildProfile, TariffPlan, Subscription, PromoCodeUsage,
+    AccountDeletionVerification,
+)
 from .services import (
     TRIAL_DEFAULT_DAYS,
     TRIAL_TARIFF_CODE,
@@ -39,6 +47,8 @@ from .serializers import (
     ParentSettingsSerializer,
     ChangePasswordSerializer,
     DeleteAccountSerializer,
+    DeleteAccountRequestCodeSerializer,
+    DeleteAccountConfirmCodeSerializer,
     AvatarSerializer,
     ChildProfileSerializer,
     ChildProfileWriteSerializer,
@@ -136,6 +146,167 @@ class DeleteAccountView(APIView):
         # не смог изменить связанные данные в момент удаления.
         with transaction.atomic():
             user = User.objects.select_for_update().get(pk=request.user.pk)
+            user.delete()
+
+        return Response(
+            {'detail': 'Аккаунт и связанные с ним данные удалены.'},
+            status=status.HTTP_200_OK,
+        )
+
+
+class DeleteAccountRequestCodeView(APIView):
+    """Публично запрашивает одноразовый код удаления аккаунта по email.
+
+    Ответ одинаков для существующего и несуществующего email, чтобы endpoint
+    нельзя было использовать для проверки регистрации конкретного адреса.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'account_delete_request'
+
+    def _generic_response(self):
+        ttl_minutes = int(getattr(settings, 'ACCOUNT_DELETION_CODE_TTL_MINUTES', 15))
+        resend_seconds = int(getattr(settings, 'ACCOUNT_DELETION_CODE_RESEND_SECONDS', 60))
+        return {
+            'detail': (
+                'Если аккаунт с таким email существует, код подтверждения '
+                'отправлен на указанную почту.'
+            ),
+            'expires_in_seconds': ttl_minutes * 60,
+            'resend_after_seconds': resend_seconds,
+        }
+
+    def post(self, request):
+        serializer = DeleteAccountRequestCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data['email']
+
+        user = User.objects.filter(email__iexact=email).first()
+        if user is None:
+            return Response(self._generic_response(), status=status.HTTP_200_OK)
+
+        ttl_minutes = int(getattr(settings, 'ACCOUNT_DELETION_CODE_TTL_MINUTES', 15))
+        resend_seconds = int(getattr(settings, 'ACCOUNT_DELETION_CODE_RESEND_SECONDS', 60))
+        now = timezone.now()
+
+        try:
+            with transaction.atomic():
+                user = User.objects.select_for_update().get(pk=user.pk)
+                verification = (
+                    AccountDeletionVerification.objects
+                    .select_for_update()
+                    .filter(user=user)
+                    .first()
+                )
+
+                if verification is not None:
+                    elapsed = (now - verification.sent_at).total_seconds()
+                    if elapsed < resend_seconds:
+                        return Response(self._generic_response(), status=status.HTTP_200_OK)
+
+                code = f'{secrets.randbelow(1_000_000):06d}'
+                code_hash = make_password(code)
+                expires_at = now + timedelta(minutes=ttl_minutes)
+
+                if verification is None:
+                    verification = AccountDeletionVerification(user=user)
+                verification.code_hash = code_hash
+                verification.expires_at = expires_at
+                verification.attempts = 0
+                verification.sent_at = now
+                verification.save()
+
+                subject = 'Код подтверждения удаления аккаунта Zenvia Kids'
+                message = (
+                    'Вы запросили удаление родительского аккаунта Zenvia Kids.\n\n'
+                    f'Код подтверждения: {code}\n\n'
+                    f'Код действует {ttl_minutes} минут.\n'
+                    'Если вы не запрашивали удаление аккаунта, просто проигнорируйте это письмо.\n\n'
+                    'Никому не сообщайте этот код.'
+                )
+                html_message = (
+                    '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">'
+                    '<h2 style="color:#234b85">Zenvia Kids</h2>'
+                    '<p>Вы запросили удаление родительского аккаунта.</p>'
+                    '<p>Код подтверждения:</p>'
+                    f'<div style="font-size:32px;font-weight:700;letter-spacing:8px;'
+                    f'padding:16px 0;color:#234b85">{code}</div>'
+                    f'<p>Код действует {ttl_minutes} минут.</p>'
+                    '<p>Если вы не запрашивали удаление аккаунта, просто проигнорируйте это письмо.</p>'
+                    '<p><strong>Никому не сообщайте этот код.</strong></p>'
+                    '</div>'
+                )
+
+                send_mail(
+                    subject,
+                    message,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    html_message=html_message,
+                    using='default',
+                )
+        except Exception:
+            logger.exception('Failed to send account deletion code email=%s', email)
+            return Response(
+                {'detail': 'Не удалось отправить код. Повторите попытку позже.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(self._generic_response(), status=status.HTTP_200_OK)
+
+
+class DeleteAccountConfirmCodeView(APIView):
+    """Проверяет email + одноразовый код и безвозвратно удаляет аккаунт."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'account_delete_confirm'
+
+    invalid_response = {'detail': 'Неверный или просроченный код подтверждения.'}
+
+    def post(self, request):
+        serializer = DeleteAccountConfirmCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data['email']
+        code = serializer.validated_data['code']
+        max_attempts = int(getattr(settings, 'ACCOUNT_DELETION_CODE_MAX_ATTEMPTS', 5))
+        now = timezone.now()
+
+        with transaction.atomic():
+            user = (
+                User.objects
+                .select_for_update()
+                .filter(email__iexact=email)
+                .first()
+            )
+            if user is None:
+                return Response(self.invalid_response, status=status.HTTP_400_BAD_REQUEST)
+
+            verification = (
+                AccountDeletionVerification.objects
+                .select_for_update()
+                .filter(user=user)
+                .first()
+            )
+            if verification is None:
+                return Response(self.invalid_response, status=status.HTTP_400_BAD_REQUEST)
+
+            if verification.expires_at <= now or verification.attempts >= max_attempts:
+                verification.delete()
+                return Response(self.invalid_response, status=status.HTTP_400_BAD_REQUEST)
+
+            if not check_password(code, verification.code_hash):
+                verification.attempts += 1
+                if verification.attempts >= max_attempts:
+                    verification.delete()
+                else:
+                    verification.save(update_fields=['attempts', 'updated_at'])
+                return Response(self.invalid_response, status=status.HTTP_400_BAD_REQUEST)
+
+            # User является корнем персональных данных проекта. Связанные
+            # ChildProfile, учебный прогресс, Subscription, PromoCodeUsage и
+            # LegalAcceptance удаляются каскадно так же, как в DeleteAccountView.
             user.delete()
 
         return Response(
