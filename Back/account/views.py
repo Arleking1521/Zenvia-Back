@@ -67,10 +67,15 @@ class RegisterView(CreateAPIView):
     queryset = User.objects.all()
     serializer_class = ParentRegisterSerializer
     permission_classes = [AllowAny]
+    # Публичный endpoint не должен пытаться валидировать старый JWT.
+    # После удаления аккаунта приложение может ещё отправлять токен удалённого пользователя.
+    authentication_classes = []
 
 
 class ParentLoginView(APIView):
     permission_classes = [AllowAny]
+    # Логин должен работать независимо от Authorization-заголовка клиента.
+    authentication_classes = []
 
     def post(self, request):
         serializer = ParentLoginSerializer(data=request.data)
@@ -162,6 +167,7 @@ class DeleteAccountRequestCodeView(APIView):
     """
 
     permission_classes = [AllowAny]
+    authentication_classes = []
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'account_delete_request'
 
@@ -260,6 +266,7 @@ class DeleteAccountConfirmCodeView(APIView):
     """Проверяет email + одноразовый код и безвозвратно удаляет аккаунт."""
 
     permission_classes = [AllowAny]
+    authentication_classes = []
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'account_delete_confirm'
 
@@ -319,6 +326,7 @@ class AvatarViewSet(ReadOnlyModelViewSet):
     queryset = Avatar.objects.all().order_by('id')
     serializer_class = AvatarSerializer
     permission_classes = [AllowAny]
+    authentication_classes = []
 
 
 class ChildProfileViewSet(ModelViewSet):
