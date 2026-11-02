@@ -226,23 +226,86 @@ class Kindergarten(models.Model):
 
 
 class PromoCode(models.Model):
+    MODE_DIRECT_ACCESS = 'direct_access'
+    MODE_GOOGLE_PLAY = 'google_play'
+    MODE_CHOICES = (
+        (MODE_DIRECT_ACCESS, 'Прямой доступ'),
+        (MODE_GOOGLE_PLAY, 'Покупка через Google Play'),
+    )
+
+    CHANNEL_KINDERGARTEN = 'kindergarten'
+    CHANNEL_BLOGGER = 'blogger'
+    CHANNEL_MANAGER = 'manager'
+    CHANNEL_ADVERTISING = 'advertising'
+    CHANNEL_OTHER = 'other'
+    CHANNEL_CHOICES = (
+        (CHANNEL_KINDERGARTEN, 'Детский сад'),
+        (CHANNEL_BLOGGER, 'Блогер'),
+        (CHANNEL_MANAGER, 'Менеджер'),
+        (CHANNEL_ADVERTISING, 'Реклама'),
+        (CHANNEL_OTHER, 'Другое'),
+    )
+
     code = models.CharField(
         max_length=64,
         unique=True,
         db_index=True,
         verbose_name='Промокод',
     )
+    mode = models.CharField(
+        max_length=24,
+        choices=MODE_CHOICES,
+        default=MODE_GOOGLE_PLAY,
+        verbose_name='Режим промокода',
+        help_text=(
+            'Прямой доступ сразу активирует подписку. Google Play — код '
+            'учитывается только после подтверждённой покупки в Google Play.'
+        ),
+    )
+    channel = models.CharField(
+        max_length=24,
+        choices=CHANNEL_CHOICES,
+        default=CHANNEL_KINDERGARTEN,
+        verbose_name='Канал распространения',
+    )
     kindergarten = models.ForeignKey(
         Kindergarten,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name='promo_codes',
+        null=True,
+        blank=True,
         verbose_name='Детский сад',
+    )
+    partner_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name='Партнёр / блогер',
+        help_text='Например: блогер Aida Kids или название партнёра.',
+    )
+    campaign_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name='Рекламная кампания',
+    )
+    manager_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name='Менеджер',
     )
     tariff = models.ForeignKey(
         TariffPlan,
         on_delete=models.PROTECT,
         related_name='promo_codes',
-        verbose_name='Скрытый тариф',
+        verbose_name='Тариф',
+    )
+    access_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name='Дней прямого доступа',
+        help_text=(
+            'Только для режима «Прямой доступ». Если пусто, используется '
+            'duration_days выбранного тарифа.'
+        ),
     )
     is_active = models.BooleanField(default=True, verbose_name='Активен')
     valid_from = models.DateTimeField(
@@ -259,7 +322,7 @@ class PromoCode(models.Model):
         null=True,
         blank=True,
         verbose_name='Максимальное число использований',
-        help_text='Оставьте пустым, если лимита нет.',
+        help_text='1 — одноразовый код; пусто — без общего лимита.',
     )
     one_use_per_parent = models.BooleanField(
         default=True,
@@ -271,21 +334,80 @@ class PromoCode(models.Model):
     class Meta:
         verbose_name = 'Промокод'
         verbose_name_plural = 'Промокоды'
-        ordering = ['kindergarten__name', 'code']
+        ordering = ['channel', 'campaign_name', 'code']
+
+    @property
+    def display_name(self):
+        if self.kindergarten_id:
+            return self.kindergarten.name
+        return (
+            (self.partner_name or '').strip()
+            or (self.campaign_name or '').strip()
+            or self.get_channel_display()
+        )
+
+    @property
+    def effective_access_days(self):
+        return int(self.access_days or self.tariff.duration_days)
+
+    def unavailability_reason(self, parent=None):
+        now = timezone.now()
+        if not self.is_active:
+            return 'Промокод отключён.'
+        if self.kindergarten_id and not self.kindergarten.is_active:
+            return 'Промокод этого детского сада временно недоступен.'
+        if not self.tariff.is_active:
+            return 'Тариф по этому промокоду временно недоступен.'
+        if self.valid_from and self.valid_from > now:
+            return 'Промокод ещё не начал действовать.'
+        if self.valid_until and self.valid_until <= now:
+            return 'Срок действия промокода истёк.'
+        if self.max_uses is not None and self.usages.count() >= self.max_uses:
+            return 'Лимит активаций этого промокода исчерпан.'
+        if (
+            parent is not None
+            and self.one_use_per_parent
+            and self.usages.filter(parent=parent).exists()
+        ):
+            return 'Этот промокод уже был использован вашим аккаунтом.'
+        return None
 
     def clean(self):
         super().clean()
-        if self.tariff_id and self.tariff.is_public:
-            raise ValidationError({
-                'tariff': 'Для промокода выберите скрытый тариф (is_public=False).'
-            })
+        errors = {}
+        if self.valid_from and self.valid_until and self.valid_from >= self.valid_until:
+            errors['valid_until'] = 'Дата окончания должна быть позже даты начала.'
+        if self.mode == self.MODE_GOOGLE_PLAY:
+            if self.tariff_id and not self.tariff.google_play_enabled:
+                errors['tariff'] = (
+                    'Для режима Google Play выберите тариф с включённой оплатой Google Play.'
+                )
+            if self.access_days is not None:
+                errors['access_days'] = (
+                    'Для Google Play срок задаётся базовым планом Google Play, '
+                    'поле прямого доступа оставьте пустым.'
+                )
+        elif self.mode == self.MODE_DIRECT_ACCESS:
+            if self.access_days is not None and self.access_days < 1:
+                errors['access_days'] = 'Срок доступа должен быть не меньше 1 дня.'
+        if self.channel == self.CHANNEL_KINDERGARTEN and not (
+            self.kindergarten_id or (self.partner_name or '').strip()
+        ):
+            errors['kindergarten'] = (
+                'Для канала «Детский сад» выберите детский сад или укажите партнёра.'
+            )
+        if errors:
+            raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
         self.code = (self.code or '').strip().upper()
+        self.partner_name = (self.partner_name or '').strip()
+        self.campaign_name = (self.campaign_name or '').strip()
+        self.manager_name = (self.manager_name or '').strip()
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'{self.code} — {self.kindergarten.name}'
+        return f'{self.code} — {self.display_name}'
 
 
 class Subscription(models.Model):
@@ -365,15 +487,21 @@ class PromoCodeUsage(models.Model):
     )
     parent = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name='promo_code_usages',
+        null=True,
+        blank=True,
         verbose_name='Родитель',
+        help_text='После удаления аккаунта очищается, но факт использования кода сохраняется.',
     )
     subscription = models.OneToOneField(
         Subscription,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name='promo_usage',
+        null=True,
+        blank=True,
         verbose_name='Подписка',
+        help_text='После удаления подписки факт использования промокода сохраняется.',
     )
     used_at = models.DateTimeField(auto_now_add=True, verbose_name='Использован')
 
@@ -383,7 +511,7 @@ class PromoCodeUsage(models.Model):
         ordering = ['-used_at']
 
     def __str__(self):
-        return f'{self.promo_code.code} — {self.parent.email}'
+        return f"{self.promo_code.code} — {self.parent.email if self.parent_id else 'удалённый аккаунт'}"
 
 class AccountDeletionVerification(models.Model):
     """Одноразовый код подтверждения удаления родительского аккаунта."""

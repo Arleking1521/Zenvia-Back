@@ -114,18 +114,65 @@ class PromoCodeAdmin(admin.ModelAdmin):
     list_display = (
         'id',
         'code',
-        'kindergarten',
+        'mode',
+        'channel',
+        'display_partner',
+        'campaign_name',
+        'manager_name',
         'tariff',
         'is_active',
-        'valid_from',
-        'valid_until',
         'max_uses',
         'usage_count',
     )
-    list_filter = ('is_active', 'one_use_per_parent', 'kindergarten')
-    search_fields = ('code', 'kindergarten__name', 'tariff__title')
+    list_filter = (
+        'mode',
+        'channel',
+        'is_active',
+        'one_use_per_parent',
+        'kindergarten',
+        'tariff',
+    )
+    search_fields = (
+        'code',
+        'partner_name',
+        'campaign_name',
+        'manager_name',
+        'kindergarten__name',
+        'tariff__title',
+    )
     autocomplete_fields = ('kindergarten', 'tariff')
     readonly_fields = ('created_at', 'updated_at', 'usage_count')
+    fieldsets = (
+        ('Код', {
+            'fields': ('code', 'is_active', 'mode', 'channel'),
+        }),
+        ('Канал и партнёр', {
+            'fields': (
+                'kindergarten', 'partner_name', 'campaign_name', 'manager_name',
+            ),
+        }),
+        ('Доступ / оплата', {
+            'fields': ('tariff', 'access_days'),
+            'description': (
+                'Для прямого доступа задайте число дней или оставьте пустым, '
+                'чтобы использовать срок тарифа. Для Google Play выберите '
+                'тариф с настроенными Product ID и Base Plan ID.'
+            ),
+        }),
+        ('Ограничения', {
+            'fields': (
+                'valid_from', 'valid_until', 'max_uses', 'one_use_per_parent',
+            ),
+        }),
+        ('Статистика', {
+            'fields': ('usage_count', 'created_at', 'updated_at'),
+            'classes': ('collapse',),
+        }),
+    )
+
+    @admin.display(description='Партнёр / источник')
+    def display_partner(self, obj):
+        return obj.display_name
 
     @admin.display(description='Использований')
     def usage_count(self, obj):
@@ -133,26 +180,25 @@ class PromoCodeAdmin(admin.ModelAdmin):
             return 0
         return obj.usages.count()
 
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == 'tariff':
-            kwargs['queryset'] = TariffPlan.objects.filter(
-                is_active=True,
-                is_public=False,
-            )
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
 
 @admin.register(PromoCodeUsage)
 class PromoCodeUsageAdmin(admin.ModelAdmin):
-    list_display = ('id', 'promo_code', 'parent', 'subscription', 'used_at')
-    list_filter = ('promo_code__kindergarten', 'promo_code')
+    list_display = ('id', 'promo_code', 'promo_channel', 'parent', 'subscription', 'used_at')
+    list_filter = ('promo_code__mode', 'promo_code__channel', 'promo_code', 'used_at')
     search_fields = (
         'promo_code__code',
         'promo_code__kindergarten__name',
+        'promo_code__partner_name',
+        'promo_code__campaign_name',
+        'promo_code__manager_name',
         'parent__email',
     )
     autocomplete_fields = ('promo_code', 'parent', 'subscription')
     readonly_fields = ('used_at',)
+
+    @admin.display(description='Канал')
+    def promo_channel(self, obj):
+        return obj.promo_code.get_channel_display()
 
 
 @admin.register(Subscription)

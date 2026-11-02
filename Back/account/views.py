@@ -21,7 +21,7 @@ from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet, GenericV
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
-    User, Avatar, ChildProfile, TariffPlan, Subscription, PromoCodeUsage,
+    User, Avatar, ChildProfile, TariffPlan, Subscription, PromoCode, PromoCodeUsage,
     AccountDeletionVerification,
 )
 from .services import (
@@ -56,6 +56,7 @@ from .serializers import (
     SubscriptionSerializer,
     SubscriptionCreateSerializer,
     PromoCodeValidateSerializer,
+    PromoCodeRedeemSerializer,
     FakePaymentPurchaseSerializer,
     GooglePlayPurchaseVerifySerializer,
 )
@@ -132,7 +133,7 @@ class DeleteAccountView(APIView):
     """Безвозвратно удаляет родительский аккаунт и связанные данные.
 
     User является корнем пользовательских данных. Связанные ChildProfile,
-    Subscription, PromoCodeUsage и LegalAcceptance используют CASCADE;
+    Subscription и LegalAcceptance используют CASCADE; PromoCodeUsage обезличивается через SET_NULL;
     учебные данные ребёнка, в свою очередь, каскадно удаляются вместе с
     ChildProfile. Общие справочники, тарифы, промокоды, языки, аватары и
     юридические документы не удаляются.
@@ -312,8 +313,8 @@ class DeleteAccountConfirmCodeView(APIView):
                 return Response(self.invalid_response, status=status.HTTP_400_BAD_REQUEST)
 
             # User является корнем персональных данных проекта. Связанные
-            # ChildProfile, учебный прогресс, Subscription, PromoCodeUsage и
-            # LegalAcceptance удаляются каскадно так же, как в DeleteAccountView.
+            # ChildProfile, учебный прогресс, Subscription и LegalAcceptance удаляются
+            # каскадно; PromoCodeUsage остаётся обезличенной записью факта использования.
             user.delete()
 
         return Response(
@@ -411,18 +412,116 @@ class PromoCodeValidateView(APIView):
         serializer.is_valid(raise_exception=True)
         promo = serializer.validated_data['promo']
 
+        kindergarten = None
+        if promo.kindergarten_id:
+            kindergarten = {
+                'id': promo.kindergarten_id,
+                'name': promo.kindergarten.name,
+            }
+
         return Response({
             'valid': True,
             'code': promo.code,
-            'kindergarten': {
-                'id': promo.kindergarten_id,
-                'name': promo.kindergarten.name,
-            },
+            'mode': promo.mode,
+            'channel': promo.channel,
+            'display_name': promo.display_name,
+            'partner_name': promo.partner_name,
+            'campaign_name': promo.campaign_name,
+            'manager_name': promo.manager_name,
+            'access_days': (
+                promo.effective_access_days
+                if promo.mode == PromoCode.MODE_DIRECT_ACCESS
+                else None
+            ),
+            'kindergarten': kindergarten,
             'tariff': TariffPlanSerializer(
                 promo.tariff,
                 context={'request': request},
             ).data,
         })
+
+
+class PromoCodeRedeemView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = PromoCodeRedeemSerializer(
+            data=request.data,
+            context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        validated_promo = serializer.validated_data['promo']
+
+        parent = User.objects.select_for_update().get(pk=request.user.pk)
+        promo = (
+            PromoCode.objects
+            .select_for_update()
+            .select_related('kindergarten', 'tariff')
+            .get(pk=validated_promo.pk)
+        )
+
+        error = promo.unavailability_reason(parent)
+        if error:
+            return Response({'code': [error]}, status=status.HTTP_400_BAD_REQUEST)
+        if promo.mode != PromoCode.MODE_DIRECT_ACCESS:
+            return Response(
+                {'code': ['Этот промокод используется вместе с оплатой через Google Play.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        active = get_active_subscription(parent)
+        has_pending = parent.subscriptions.filter(
+            status=Subscription.STATUS_PENDING,
+        ).exists()
+        if active is not None or has_pending:
+            return Response(
+                {
+                    'detail': (
+                        'Нельзя активировать код, пока есть активная подписка '
+                        'или подписка, ожидающая оплаты.'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tariff = promo.tariff
+        children_count = parent.children.filter(is_active=True).count()
+        if children_count > tariff.max_children:
+            return Response(
+                {
+                    'detail': (
+                        f'Тариф поддерживает максимум {tariff.max_children} '
+                        f'профилей детей, а у вас уже создано {children_count}.'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        now = timezone.now()
+        subscription = Subscription.objects.create(
+            parent=parent,
+            tariff=tariff,
+            status=Subscription.STATUS_ACTIVE,
+            starts_at=now,
+            ends_at=now + timedelta(days=promo.effective_access_days),
+            auto_renew=False,
+            payment_provider='promo_code',
+            external_payment_id=f'promo:{promo.code}',
+        )
+        PromoCodeUsage.objects.create(
+            promo_code=promo,
+            parent=parent,
+            subscription=subscription,
+        )
+
+        return Response(
+            SubscriptionSerializer(
+                subscription,
+                context={'request': request},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class SubscriptionViewSet(
@@ -636,6 +735,15 @@ class SubscriptionViewSet(
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             promo = promo_serializer.validated_data['promo']
+            if promo.mode != PromoCode.MODE_GOOGLE_PLAY:
+                return Response(
+                    {
+                        'promo_code': [
+                            'Этот промокод активирует доступ напрямую и не используется для Google Play.'
+                        ]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         try:
             with transaction.atomic():
@@ -645,6 +753,19 @@ class SubscriptionViewSet(
                 )
 
                 if promo is not None:
+                    promo = (
+                        PromoCode.objects
+                        .select_for_update()
+                        .select_related('kindergarten', 'tariff')
+                        .get(pk=promo.pk)
+                    )
+                    promo_error = promo.unavailability_reason(request.user)
+                    if promo_error:
+                        raise GooglePlayVerificationError(promo_error)
+                    if promo.mode != PromoCode.MODE_GOOGLE_PLAY:
+                        raise GooglePlayVerificationError(
+                            'Этот промокод не предназначен для оплаты через Google Play.'
+                        )
                     if subscription.tariff_id != promo.tariff_id:
                         raise GooglePlayVerificationError(
                             'Купленный Google Play тариф не соответствует промокоду.'

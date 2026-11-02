@@ -399,28 +399,7 @@ def _normalize_promo_code(value):
 
 
 def _promo_error(promo, parent=None):
-
-    now = timezone.now()
-
-    if not promo.is_active:
-        return 'Промокод отключён.'
-    if not promo.kindergarten.is_active:
-        return 'Промокод этого детского сада временно недоступен.'
-    if not promo.tariff.is_active:
-        return 'Тариф по этому промокоду временно недоступен.'
-    if promo.valid_from and promo.valid_from > now:
-        return 'Промокод ещё не начал действовать.'
-    if promo.valid_until and promo.valid_until <= now:
-        return 'Срок действия промокода истёк.'
-    if promo.max_uses is not None and promo.usages.count() >= promo.max_uses:
-        return 'Лимит активаций этого промокода исчерпан.'
-    if (
-        parent is not None
-        and promo.one_use_per_parent
-        and promo.usages.filter(parent=parent).exists()
-    ):
-        return 'Этот промокод уже был использован вашим аккаунтом.'
-    return None
+    return promo.unavailability_reason(parent)
 
 
 class PromoCodeValidateSerializer(serializers.Serializer):
@@ -448,6 +427,17 @@ class PromoCodeValidateSerializer(serializers.Serializer):
             raise serializers.ValidationError({'code': error})
 
         attrs['promo'] = promo
+        return attrs
+
+
+class PromoCodeRedeemSerializer(PromoCodeValidateSerializer):
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        promo = attrs['promo']
+        if promo.mode != PromoCode.MODE_DIRECT_ACCESS:
+            raise serializers.ValidationError({
+                'code': 'Этот промокод используется вместе с оплатой через Google Play.'
+            })
         return attrs
 
 
@@ -489,6 +479,8 @@ class SubscriptionSerializer(serializers.ModelSerializer):
         try:
             kindergarten = obj.promo_usage.promo_code.kindergarten
         except PromoCodeUsage.DoesNotExist:
+            return None
+        if kindergarten is None:
             return None
         return {
             'id': kindergarten.id,
@@ -542,6 +534,12 @@ class SubscriptionCreateSerializer(serializers.Serializer):
             error = _promo_error(promo, parent)
             if error:
                 raise serializers.ValidationError({'promo_code': error})
+            if promo.mode == PromoCode.MODE_DIRECT_ACCESS:
+                raise serializers.ValidationError({
+                    'promo_code': (
+                        'Этот код активирует доступ напрямую. Используйте активацию промокода.'
+                    )
+                })
             if tariff is not None and tariff.pk != promo.tariff_id:
                 raise serializers.ValidationError({
                     'tariff': 'Этот тариф не соответствует указанному промокоду.'
