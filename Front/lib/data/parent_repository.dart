@@ -39,7 +39,8 @@ abstract class ParentRepository {
   Future<bool> verifyParentPin(String pin);
 
   Future<List<TariffPlan>> getTariffs();
-  Future<KindergartenPromoOffer> validatePromoCode(String code);
+  Future<PromoOffer> validatePromoCode(String code);
+  Future<SubscriptionInfo> redeemPromoCode(String code);
   Future<SubscriptionInfo?> getCurrentSubscription();
   Future<SubscriptionInfo> startTrial();
   Future<SubscriptionInfo> disableAutoRenew(int subscriptionId);

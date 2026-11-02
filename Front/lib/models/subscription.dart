@@ -78,19 +78,35 @@ class SubscriptionInfo {
 }
 
 
-class KindergartenPromoOffer {
+class PromoOffer {
   final String code;
-  final int kindergartenId;
+  final String mode;
+  final String channel;
+  final String displayName;
+  final String partnerName;
+  final String campaignName;
+  final int? kindergartenId;
   final String kindergartenName;
+  final int? accessDays;
   final TariffPlan tariff;
 
-  const KindergartenPromoOffer({
+  const PromoOffer({
     required this.code,
+    required this.mode,
+    required this.channel,
+    required this.displayName,
+    required this.partnerName,
+    required this.campaignName,
     required this.kindergartenId,
     required this.kindergartenName,
+    required this.accessDays,
     required this.tariff,
   });
+
+  bool get isDirectAccess => mode == 'direct_access';
+  bool get requiresGooglePlay => mode == 'google_play';
 }
+
 
 enum FakePaymentScenario {
   success,

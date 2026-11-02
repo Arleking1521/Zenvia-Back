@@ -31,7 +31,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
   int? _processingId;
   bool _validatingPromo = false;
   bool _disablingAutoRenew = false;
-  KindergartenPromoOffer? _promoOffer;
+  PromoOffer? _promoOffer;
   StreamSubscription<List<PurchaseDetails>>? _purchaseSubscription;
   Map<int, ProductDetails> _googleProducts = const {};
   Map<int, String> _googlePrices = const {};
@@ -327,6 +327,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
         String? promoCode;
         final activePromo = _promoOffer;
         if (activePromo != null &&
+            activePromo.requiresGooglePlay &&
             activePromo.tariff.googleProductId.trim() == purchase.productID.trim()) {
           promoCode = activePromo.code.trim();
         }
@@ -404,7 +405,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
       // list, so their Google Play ProductDetails are not loaded on screen open.
       // Load the validated promo tariff explicitly and merge it with the
       // already loaded public products (for example zenvia_family/monthly).
-      if (!_fakePaymentsEnabled && Platform.isAndroid) {
+      if (offer.requiresGooglePlay && !_fakePaymentsEnabled && Platform.isAndroid) {
         await _loadGoogleProducts([offer.tariff], merge: true);
       }
 
@@ -419,7 +420,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            context.tr('promoApplied', {'name': offer.kindergartenName}),
+            context.tr('promoApplied', {'name': offer.displayName}),
           ),
         ),
       );
@@ -571,7 +572,41 @@ class _TariffsScreenState extends State<TariffsScreen> {
   Future<void> _buy(
     TariffPlan plan, {
     String? promoCode,
+    PromoOffer? promoOffer,
   }) async {
+    if (promoOffer?.isDirectAccess == true) {
+      setState(() => _processingId = plan.id);
+      try {
+        final subscription = await widget.repository.redeemPromoCode(
+          promoOffer!.code,
+        );
+        if (!mounted) return;
+        setState(() {
+          _promoOffer = null;
+          _promoController.clear();
+          _future = _load();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.tr(
+                'promoAccessActivated',
+                {'date': _dateLabel(subscription.endsAt)},
+              ),
+            ),
+          ),
+        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.toString())),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _processingId = null);
+      }
+      return;
+    }
     if (_fakePaymentsEnabled) {
       final scenario = await _chooseFakePaymentScenario(plan);
       if (scenario == null || !mounted) return;
@@ -759,6 +794,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
     required TariffPlan plan,
     required bool disabled,
     String? promoCode,
+    PromoOffer? promoOffer,
     String? badge,
     String? subtitle,
   }) {
@@ -811,17 +847,23 @@ class _TariffsScreenState extends State<TariffsScreen> {
             ],
             const SizedBox(height: 10),
             Text(
-              _googlePrices[plan.id] != null && !_fakePaymentsEnabled
-                  ? '${_googlePrices[plan.id]} / ${plan.durationDays} ${context.tr('daysShort')}'
-                  : context.tr('priceDays', {
-                      'price': plan.price,
-                      'currency': plan.currency,
-                      'days': plan.durationDays,
-                    }),
+              promoOffer?.isDirectAccess == true
+                  ? context.tr('promoDirectAccessDays', {
+                      'days': promoOffer?.accessDays ?? plan.durationDays,
+                    })
+                  : _googlePrices[plan.id] != null && !_fakePaymentsEnabled
+                      ? '${_googlePrices[plan.id]} / ${plan.durationDays} ${context.tr('daysShort')}'
+                      : context.tr('priceDays', {
+                          'price': plan.price,
+                          'currency': plan.currency,
+                          'days': plan.durationDays,
+                        }),
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             Text(context.tr('childrenUpTo', {'count': plan.maxChildren})),
-            if (!_fakePaymentsEnabled && _googlePlayIssue(plan) != null) ...[
+            if (promoOffer?.isDirectAccess != true &&
+                !_fakePaymentsEnabled &&
+                _googlePlayIssue(plan) != null) ...[
               const SizedBox(height: 10),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -853,6 +895,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
                     : () => _buy(
                           plan,
                           promoCode: promoCode,
+                          promoOffer: promoOffer,
                         ),
                 child: _processingId == plan.id
                     ? const SizedBox(
@@ -861,13 +904,15 @@ class _TariffsScreenState extends State<TariffsScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : Text(
-                        _fakePaymentsEnabled
-                            ? (promoCode == null
-                                ? context.tr('fakePayment')
-                                : context.tr('fakePromoPayment'))
-                            : (promoCode == null
-                                ? context.tr('purchasePlan')
-                                : context.tr('connectPromo')),
+                        promoOffer?.isDirectAccess == true
+                            ? context.tr('activateAccessCode')
+                            : _fakePaymentsEnabled
+                                ? (promoCode == null
+                                    ? context.tr('fakePayment')
+                                    : context.tr('fakePromoPayment'))
+                                : (promoCode == null
+                                    ? context.tr('purchasePlan')
+                                    : context.tr('connectPromo')),
                       ),
               ),
             ),
@@ -887,13 +932,13 @@ class _TariffsScreenState extends State<TariffsScreen> {
       children: [
         const SizedBox(height: 8),
         Text(
-          context.tr('kindergartenPromo'),
+          context.tr('promoCodeTitle'),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w800,
               ),
         ),
         const SizedBox(height: 4),
-        Text(context.tr('promoHint')),
+        Text(context.tr('promoUniversalHint')),
         const SizedBox(height: 12),
         TextField(
           controller: _promoController,
@@ -956,8 +1001,9 @@ class _TariffsScreenState extends State<TariffsScreen> {
             plan: offer.tariff,
             disabled: disabled,
             promoCode: offer.code,
+            promoOffer: offer,
             badge: context.tr('specialPlan'),
-            subtitle: context.tr('kindergartenName', {'name': offer.kindergartenName}),
+            subtitle: offer.displayName,
           ),
         ],
       ],

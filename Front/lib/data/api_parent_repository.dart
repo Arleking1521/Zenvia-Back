@@ -255,24 +255,44 @@ class ApiParentRepository implements ParentRepository {
   }
 
   @override
-  Future<KindergartenPromoOffer> validatePromoCode(String code) async {
+  Future<PromoOffer> validatePromoCode(String code) async {
     try {
       final response = await client.dio.post<Map<String, dynamic>>(
         ApiConfig.account('promo-codes/validate/'),
         data: {'code': code.trim()},
       );
       final data = response.data ?? const <String, dynamic>{};
-      final kindergarten = _map(data['kindergarten']) ?? const <String, dynamic>{};
+      final kindergarten = _map(data['kindergarten']);
       final tariff = _map(data['tariff']) ?? const <String, dynamic>{};
+      final kindergartenId = kindergarten == null ? null : _int(kindergarten['id']);
 
-      return KindergartenPromoOffer(
+      return PromoOffer(
         code: data['code']?.toString() ?? code.trim().toUpperCase(),
-        kindergartenId: _int(kindergarten['id']),
-        kindergartenName: kindergarten['name']?.toString() ?? '',
+        mode: data['mode']?.toString() ?? 'google_play',
+        channel: data['channel']?.toString() ?? 'other',
+        displayName: data['display_name']?.toString() ?? '',
+        partnerName: data['partner_name']?.toString() ?? '',
+        campaignName: data['campaign_name']?.toString() ?? '',
+        kindergartenId: kindergartenId != null && kindergartenId > 0 ? kindergartenId : null,
+        kindergartenName: kindergarten?['name']?.toString() ?? '',
+        accessDays: data['access_days'] == null ? null : _int(data['access_days']),
         tariff: _tariff(tariff),
       );
     } on DioException catch (e) {
       throw _apiException(e, 'Не удалось проверить промокод.');
+    }
+  }
+
+  @override
+  Future<SubscriptionInfo> redeemPromoCode(String code) async {
+    try {
+      final response = await client.dio.post<Map<String, dynamic>>(
+        ApiConfig.account('promo-codes/redeem/'),
+        data: {'code': code.trim()},
+      );
+      return _subscription(response.data ?? const <String, dynamic>{});
+    } on DioException catch (e) {
+      throw _apiException(e, 'Не удалось активировать промокод.');
     }
   }
 

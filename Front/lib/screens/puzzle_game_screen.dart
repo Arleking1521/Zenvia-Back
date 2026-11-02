@@ -23,6 +23,33 @@ class _PuzzleGameScreenState extends State<PuzzleGameScreen> {
     '.jpeg',
   };
 
+  static int _imageExtensionPriority(String asset) {
+    final lower = asset.toLowerCase();
+    if (lower.endsWith('.webp')) return 0;
+    if (lower.endsWith('.png')) return 1;
+    if (lower.endsWith('.jpg')) return 2;
+    if (lower.endsWith('.jpeg')) return 3;
+    return 99;
+  }
+
+  static String _imageStem(String asset) {
+    final dot = asset.lastIndexOf('.');
+    return dot < 0 ? asset.toLowerCase() : asset.substring(0, dot).toLowerCase();
+  }
+
+  static List<String> _preferWebpByStem(Iterable<String> candidates) {
+    final selected = <String, String>{};
+    for (final asset in candidates) {
+      final stem = _imageStem(asset);
+      final current = selected[stem];
+      if (current == null ||
+          _imageExtensionPriority(asset) < _imageExtensionPriority(current)) {
+        selected[stem] = asset;
+      }
+    }
+    return selected.values.toList()..sort();
+  }
+
   final math.Random _random = math.Random();
 
   _PuzzleDifficulty? _difficulty;
@@ -42,15 +69,14 @@ class _PuzzleGameScreenState extends State<PuzzleGameScreen> {
   Future<void> _loadPuzzleImages() async {
     try {
       final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-      final assets = manifest
+      final candidates = manifest
           .listAssets()
           .where((asset) => asset.startsWith(_puzzleAssetsPrefix))
           .where((asset) {
             final lower = asset.toLowerCase();
             return _supportedImageExtensions.any(lower.endsWith);
-          })
-          .toList()
-        ..sort();
+          });
+      final assets = _preferWebpByStem(candidates);
 
       if (!mounted) return;
 

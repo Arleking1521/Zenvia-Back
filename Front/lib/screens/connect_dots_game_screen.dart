@@ -15,6 +15,12 @@ class ConnectDotsGameScreen extends StatefulWidget {
 
 class _ConnectDotsGameScreenState extends State<ConnectDotsGameScreen> {
   static const String _assetsPrefix = 'assets/images/games/connect_dots/';
+  static const List<String> _preferredImageExtensions = <String>[
+    '.webp',
+    '.png',
+    '.jpg',
+    '.jpeg',
+  ];
 
   List<_DotPicture> _pictures = <_DotPicture>[];
   bool _loading = true;
@@ -37,7 +43,9 @@ class _ConnectDotsGameScreenState extends State<ConnectDotsGameScreen> {
     try {
       final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
       final allAssets = manifest.listAssets();
-      final assetSet = allAssets.toSet();
+      final assetByLower = <String, String>{
+        for (final asset in allAssets) asset.toLowerCase(): asset,
+      };
       final svgAssets = allAssets
           .where((asset) =>
               asset.startsWith(_assetsPrefix) &&
@@ -48,13 +56,20 @@ class _ConnectDotsGameScreenState extends State<ConnectDotsGameScreen> {
       final pictures = <_DotPicture>[];
       for (final svgAsset in svgAssets) {
         final base = svgAsset.substring(0, svgAsset.length - 4);
-        final pngAsset = '$base.png';
-        if (!assetSet.contains(pngAsset)) continue;
+        String? imageAsset;
+        for (final extension in _preferredImageExtensions) {
+          final candidate = assetByLower['${base.toLowerCase()}$extension'];
+          if (candidate != null) {
+            imageAsset = candidate;
+            break;
+          }
+        }
+        if (imageAsset == null) continue;
 
         final svg = await rootBundle.loadString(svgAsset);
         final picture = _parseSvgLevel(
           svgAsset: svgAsset,
-          pngAsset: pngAsset,
+          imageAsset: imageAsset,
           svg: svg,
         );
         if (picture != null) pictures.add(picture);
@@ -65,7 +80,7 @@ class _ConnectDotsGameScreenState extends State<ConnectDotsGameScreen> {
         _pictures = pictures;
         _loading = false;
         _loadError = pictures.isEmpty
-            ? 'В папке connect_dots не найдено ни одной пары SVG + PNG.'
+            ? 'В папке connect_dots не найдено ни одной пары SVG + WEBP.'
             : null;
       });
     } catch (_) {
@@ -79,7 +94,7 @@ class _ConnectDotsGameScreenState extends State<ConnectDotsGameScreen> {
 
   _DotPicture? _parseSvgLevel({
     required String svgAsset,
-    required String pngAsset,
+    required String imageAsset,
     required String svg,
   }) {
     String? attribute(String name) =>
@@ -205,7 +220,7 @@ class _ConnectDotsGameScreenState extends State<ConnectDotsGameScreen> {
       name: name,
       color: color,
       points: points,
-      pngAsset: pngAsset,
+      imageAsset: imageAsset,
       sourceAspectRatio: sourceAspectRatio,
     );
   }
@@ -712,6 +727,48 @@ class _ConnectDotsGameScreenState extends State<ConnectDotsGameScreen> {
       return reorderFromTop(result);
     }
 
+    // Если SVG содержит явные опорные точки сегментов (особенно A/a),
+    // не теряем их при последующей равномерной выборке. Для дуги parser
+    // добавляет start + midpoint + end. Если этих точек мало для игры,
+    // дополняем их обычными точками контура, сохраняя порядок вдоль path.
+    if (preferredPoints.length > 1) {
+      final preferred = filterClosePoints(preferredPoints, minDistance: .05);
+
+      int nearestContourIndex(Offset point) {
+        var bestIndex = 0;
+        var bestDistance = double.infinity;
+        for (var index = 0; index < closed.length - 1; index++) {
+          final distance = (closed[index] - point).distanceSquared;
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = index;
+          }
+        }
+        return bestIndex;
+      }
+
+      final target = math.max(8, math.min(18, targetCount));
+      final byContourIndex = <int, Offset>{};
+
+      // Сначала обычные точки, затем обязательные guide points поверх них.
+      for (final point in sample(target)) {
+        byContourIndex.putIfAbsent(nearestContourIndex(point), () => point);
+      }
+      for (final point in preferred) {
+        byContourIndex[nearestContourIndex(point)] = point;
+      }
+
+      final orderedEntries = byContourIndex.entries.toList()
+        ..sort((a, b) => a.key.compareTo(b.key));
+      final merged = reorderFromTop(
+        orderedEntries.map((entry) => entry.value).toList(growable: false),
+      );
+
+      if (merged.length >= 6 && !overlaps(merged, minDistance: .05)) {
+        return merged;
+      }
+    }
+
     while (targetCount >= 8) {
       final points = sample(targetCount);
       if (!overlaps(points)) return points;
@@ -753,7 +810,7 @@ class _ConnectDotsGameScreenState extends State<ConnectDotsGameScreen> {
 
     final isLast = index == _picture.points.length - 1;
     if (isLast) {
-      await precacheImage(AssetImage(_picture.pngAsset), context);
+      await precacheImage(AssetImage(_picture.imageAsset), context);
       if (!mounted) return;
     }
 
@@ -788,7 +845,7 @@ class _ConnectDotsGameScreenState extends State<ConnectDotsGameScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image.asset('assets/images/ui/celebration.png', width: 76, height: 76),
+            Image.asset('assets/images/ui/celebration.webp', width: 76, height: 76),
             const SizedBox(height: 6),
             const Text(
               'Все картинки готовы!',
@@ -1114,7 +1171,7 @@ class _DrawingBoard extends StatelessWidget {
                 Positioned.fromRect(
                   rect: imageRect,
                   child: Image.asset(
-                    picture.pngAsset,
+                    picture.imageAsset,
                     fit: BoxFit.contain,
                   ),
                 )
@@ -1293,16 +1350,16 @@ class _DotPicture {
     required this.name,
     required this.color,
     required this.points,
-    required this.pngAsset,
+    required this.imageAsset,
     required this.sourceAspectRatio,
   });
 
   final String name;
   final Color color;
 
-  /// Координаты точек 0..1 относительно viewBox SVG/PNG.
+  /// Координаты точек 0..1 относительно viewBox SVG и парного изображения.
   final List<Offset> points;
-  final String pngAsset;
+  final String imageAsset;
   final double sourceAspectRatio;
 }
 
