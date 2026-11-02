@@ -38,7 +38,7 @@ class _OfflineModeScreenState extends State<OfflineModeScreen> {
         fit: StackFit.expand,
         children: [
           const Image(
-            image: AssetImage('assets/images/subscription_blocked_bg.png'),
+            image: AssetImage('assets/images/subscription_blocked_bg.webp'),
             fit: BoxFit.cover,
           ),
           DecoratedBox(
@@ -88,7 +88,7 @@ class _OfflineModeScreenState extends State<OfflineModeScreen> {
                               child: IgnorePointer(
                                 child: Center(
                                   child: Image.asset(
-                                    'assets/images/subscription_blocked_sleep_dragon.png',
+                                    'assets/images/subscription_blocked_sleep_dragon.webp',
                                     height: dragonHeight,
                                     fit: BoxFit.contain,
                                   ),

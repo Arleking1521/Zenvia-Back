@@ -78,7 +78,7 @@ class _ParentLoginScreenState extends State<ParentLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FantasyBackground(
+      body: _LoginCloudBackground(
         light: false,
         child: SafeArea(
           child: Center(
@@ -139,3 +139,41 @@ class _ParentLoginScreenState extends State<ParentLoginScreen> {
     );
   }
 }
+
+class _LoginCloudBackground extends StatelessWidget {
+  final Widget child;
+  final bool light;
+
+  const _LoginCloudBackground({
+    required this.child,
+    this.light = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const Image(
+          image: AssetImage('assets/images/home_language_bg.webp'),
+          fit: BoxFit.cover,
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.white.withValues(alpha: .08),
+                Colors.white.withValues(alpha: .16),
+                const Color(0xFFF3FFF1).withValues(alpha: .22),
+              ],
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
+}
+

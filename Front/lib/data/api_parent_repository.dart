@@ -319,11 +319,19 @@ class ApiParentRepository implements ParentRepository {
   }
 
   @override
-  Future<SubscriptionInfo> verifyGooglePlayPurchase(String purchaseToken) async {
+  Future<SubscriptionInfo> verifyGooglePlayPurchase(
+    String purchaseToken, {
+    String? promoCode,
+  }) async {
     try {
+      final normalizedPromo = promoCode?.trim();
       final response = await client.dio.post<Map<String, dynamic>>(
         ApiConfig.account('subscriptions/google-play/verify/'),
-        data: {'purchase_token': purchaseToken},
+        data: {
+          'purchase_token': purchaseToken,
+          if (normalizedPromo != null && normalizedPromo.isNotEmpty)
+            'promo_code': normalizedPromo,
+        },
       );
       return _subscription(response.data ?? const <String, dynamic>{});
     } on DioException catch (e) {

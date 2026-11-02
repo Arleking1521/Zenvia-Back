@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -27,37 +28,178 @@ class SmartContentScreen extends StatefulWidget {
 }
 
 class _SmartContentScreenState extends State<SmartContentScreen> {
-  late Future<List<LiteraryContentItem>> _future;
-  LiteraryContentType? _filter;
+  static const int _pageSize = 20;
+
   final AudioPlayer _audioPlayer = AudioPlayer();
   final Dio _dio = Dio();
   final Map<String, Uint8List> _cache = <String, Uint8List>{};
+  final ScrollController _scrollController = ScrollController();
+  final List<LiteraryContentItem> _items = <LiteraryContentItem>[];
+
+  LiteraryContentType? _filter;
+  Set<LiteraryContentType> _availableTypes = <LiteraryContentType>{};
   int? _playingId;
+  bool _audioBusy = false;
+  StreamSubscription<void>? _completeSubscription;
+
+  bool _initialLoading = true;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  int _nextPage = 1;
+  int _loadGeneration = 0;
+  Object? _loadError;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.repository.getLiteraryContent(widget.language);
+    _completeSubscription = _audioPlayer.onPlayerComplete.listen((_) {
+      if (!mounted) return;
+      setState(() {
+        _playingId = null;
+        _audioBusy = false;
+      });
+    });
+    _scrollController.addListener(_onScroll);
+    _resetAndLoad();
   }
 
   @override
   void dispose() {
+    _completeSubscription?.cancel();
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
     _audioPlayer.dispose();
     super.dispose();
   }
 
+  void _onScroll() {
+    if (!_scrollController.hasClients || _initialLoading || _loadingMore || !_hasMore) {
+      return;
+    }
+    if (_scrollController.position.extentAfter < 700) {
+      _loadNextPage();
+    }
+  }
+
+  Future<void> _resetAndLoad() async {
+    final generation = ++_loadGeneration;
+    if (mounted) {
+      setState(() {
+        _initialLoading = true;
+        _loadingMore = false;
+        _hasMore = true;
+        _nextPage = 1;
+        _loadError = null;
+        _items.clear();
+      });
+    }
+
+    try {
+      final page = await widget.repository.getLiteraryContentPage(
+        widget.language,
+        type: _filter,
+        page: 1,
+        pageSize: _pageSize,
+      );
+      if (!mounted || generation != _loadGeneration) return;
+
+      await precacheBackendImages(
+        context,
+        page.items.map((item) => item.imageUrl),
+      );
+      if (!mounted || generation != _loadGeneration) return;
+
+      setState(() {
+        _items
+          ..clear()
+          ..addAll(page.items);
+        _availableTypes = page.availableTypes;
+        if (_filter != null && !_availableTypes.contains(_filter)) {
+          _filter = null;
+        }
+        _hasMore = page.hasNext;
+        _nextPage = 2;
+        _initialLoading = false;
+      });
+    } catch (error) {
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _loadError = error;
+        _initialLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadNextPage() async {
+    if (_initialLoading || _loadingMore || !_hasMore) return;
+    final generation = _loadGeneration;
+    final pageNumber = _nextPage;
+    setState(() => _loadingMore = true);
+
+    try {
+      final page = await widget.repository.getLiteraryContentPage(
+        widget.language,
+        type: _filter,
+        page: pageNumber,
+        pageSize: _pageSize,
+      );
+      if (!mounted || generation != _loadGeneration) return;
+
+      await precacheBackendImages(
+        context,
+        page.items.map((item) => item.imageUrl),
+      );
+      if (!mounted || generation != _loadGeneration) return;
+
+      final knownIds = _items.map((item) => item.id).toSet();
+      setState(() {
+        _items.addAll(page.items.where((item) => !knownIds.contains(item.id)));
+        if (page.availableTypes.isNotEmpty) {
+          _availableTypes = page.availableTypes;
+        }
+        _hasMore = page.hasNext;
+        _nextPage = pageNumber + 1;
+        _loadingMore = false;
+      });
+    } catch (_) {
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() => _loadingMore = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.tr('smartLoadFailed'))),
+      );
+    }
+  }
+
   Future<void> _refresh() async {
-    setState(() {
-      _future = widget.repository.getLiteraryContent(widget.language);
-    });
-    await _future;
+    await _resetAndLoad();
+  }
+
+  void _changeFilter(LiteraryContentType? filter) {
+    if (_filter == filter) return;
+    setState(() => _filter = filter);
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    _resetAndLoad();
   }
 
   Future<void> _play(LiteraryContentItem item) async {
     final url = item.audioUrl?.trim();
-    if (url == null || url.isEmpty) return;
+    if (url == null || url.isEmpty || _audioBusy) return;
 
-    setState(() => _playingId = item.id);
+    if (_playingId == item.id) {
+      await _audioPlayer.stop();
+      if (mounted) setState(() => _playingId = null);
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _playingId = item.id;
+        _audioBusy = true;
+      });
+    }
     try {
       var bytes = _cache[url];
       if (bytes == null) {
@@ -75,6 +217,7 @@ class _SmartContentScreenState extends State<SmartContentScreen> {
         BytesSource(bytes),
         volume: AudioSettingsService.instance.voiceVolume,
       );
+      if (mounted) setState(() => _audioBusy = false);
       try {
         await widget.repository.markLiteraryContentListened(item.id);
       } catch (_) {
@@ -82,179 +225,193 @@ class _SmartContentScreenState extends State<SmartContentScreen> {
       }
     } catch (_) {
       if (mounted) {
+        setState(() {
+          _playingId = null;
+          _audioBusy = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(context.tr('smartAudioPlayFailed'))),
         );
       }
-    } finally {
-      if (mounted) setState(() => _playingId = null);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FantasyBackground(
+      body: CloudWorldBackground(
         child: SafeArea(
-          child: FutureBuilder<List<LiteraryContentItem>>(
-            future: _future,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
-                return const Center(
-                  child: CircularProgressIndicator(color: AppColors.primary),
-                );
-              }
-
-              if (snapshot.hasError) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: MagicCard(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text('💡', style: TextStyle(fontSize: 48)),
-                          const SizedBox(height: 10),
-                          Text(
-                            context.tr('smartLoadFailed'),
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.deepBlue,
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          MagicPrimaryButton(label: context.tr('retry'), onPressed: _refresh),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              }
-
-              final allItems = snapshot.data ?? const <LiteraryContentItem>[];
-              final items = _filter == null
-                  ? allItems
-                  : allItems.where((item) => item.type == _filter).toList();
-
-              return RefreshIndicator(
-                onRefresh: _refresh,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
-                  children: [
-                    Row(
-                      children: [
-                        _BackButton(onTap: () => Navigator.of(context).pop()),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            context.tr('knowledgeCave'),
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 25,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.deepBlue,
-                            ),
+          child: _initialLoading
+              ? const ZenviaLoadingScreen()
+              : _loadError != null && _items.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: MagicCard(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const AppArtIcon(
+                                asset: 'assets/images/ui/lightbulb.webp',
+                                size: 58,
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                context.tr('smartLoadFailed'),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.deepBlue,
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              MagicPrimaryButton(
+                                label: context.tr('retry'),
+                                onPressed: _refresh,
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 48),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    MagicCard(
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Color(0xFF9B5DE5), Color(0xFF6A4BC6)],
                       ),
-                      child: Column(
+                    )
+                  : RefreshIndicator(
+                      onRefresh: _refresh,
+                      child: ListView(
+                        controller: _scrollController,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
                         children: [
-                          const Text('💡', style: TextStyle(fontSize: 50)),
-                          const SizedBox(height: 5),
-                          Text(
-                            context.tr('wantBeSmart'),
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 23,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '${widget.language.flagEmoji} ${widget.language.label}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          _FilterChip(
-                            label: context.tr('allFilter'),
-                            selected: _filter == null,
-                            onTap: () => setState(() => _filter = null),
-                          ),
-                          ...LiteraryContentType.values
-                              .where((type) => type != LiteraryContentType.other)
-                              .map(
-                                (type) => Padding(
-                                  padding: const EdgeInsets.only(left: 8),
-                                  child: _FilterChip(
-                                    label: '${type.emoji} ${_literaryTypeTitle(context, type)}',
-                                    selected: _filter == type,
-                                    onTap: () => setState(() => _filter = type),
+                          Row(
+                            children: [
+                              _BackButton(onTap: () => Navigator.of(context).pop()),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  context.tr('knowledgeCave'),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 25,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppColors.deepBlue,
                                   ),
                                 ),
                               ),
+                              const SizedBox(width: 48),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          MagicCard(
+                            gradient: const LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [Color(0xFF9B5DE5), Color(0xFF6A4BC6)],
+                            ),
+                            child: Column(
+                              children: [
+                                const AppArtIcon(
+                                  asset: 'assets/images/ui/lightbulb.webp',
+                                  size: 62,
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  context.tr('wantBeSmart'),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 23,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${widget.language.flagEmoji} ${widget.language.label}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                _FilterChip(
+                                  label: context.tr('allFilter'),
+                                  selected: _filter == null,
+                                  onTap: () => _changeFilter(null),
+                                ),
+                                ...LiteraryContentType.values
+                                    .where((type) =>
+                                        type != LiteraryContentType.other &&
+                                        _availableTypes.contains(type))
+                                    .map(
+                                      (type) => Padding(
+                                        padding: const EdgeInsets.only(left: 8),
+                                        child: _FilterChip(
+                                          label: _literaryTypeTitle(context, type),
+                                          asset: _literaryTypeAsset(type),
+                                          selected: _filter == type,
+                                          onTap: () => _changeFilter(type),
+                                        ),
+                                      ),
+                                    ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          if (_items.isEmpty)
+                            MagicCard(
+                              child: Column(
+                                children: [
+                                  const AppArtIcon(
+                                    asset: 'assets/images/ui/book.webp',
+                                    size: 58,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _filter == null
+                                        ? context.tr('noSmartContent')
+                                        : context.tr('emptyCategory'),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            ..._items.map(
+                              (item) => Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _ContentCard(
+                                  item: item,
+                                  loadingAudio: _audioBusy && _playingId == item.id,
+                                  playingAudio: !_audioBusy && _playingId == item.id,
+                                  onPlay: item.audioUrl == null ? null : () => _play(item),
+                                ),
+                              ),
+                            ),
+                          if (_loadingMore)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 18),
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          if (!_hasMore && _items.isNotEmpty)
+                            const SizedBox(height: 8),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    if (items.isEmpty)
-                      MagicCard(
-                        child: Column(
-                          children: [
-                            const Text('📚', style: TextStyle(fontSize: 46)),
-                            const SizedBox(height: 8),
-                            Text(
-                              allItems.isEmpty
-                                  ? context.tr('noSmartContent')
-                                  : context.tr('emptyCategory'),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: AppColors.textSecondary,
-                                fontWeight: FontWeight.w700,
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      ...items.map(
-                        (item) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _ContentCard(
-                            item: item,
-                            loadingAudio: _playingId == item.id,
-                            onPlay: item.audioUrl == null ? null : () => _play(item),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              );
-            },
-          ),
         ),
       ),
     );
@@ -276,14 +433,31 @@ String _literaryTypeTitle(BuildContext context, LiteraryContentType type) {
   }
 }
 
+String _literaryTypeAsset(LiteraryContentType type) {
+  switch (type) {
+    case LiteraryContentType.poem:
+      return 'assets/images/ui/book.webp';
+    case LiteraryContentType.proverb:
+      return 'assets/images/ui/proverbs.webp';
+    case LiteraryContentType.riddle:
+      return 'assets/images/ui/puzzle.webp';
+    case LiteraryContentType.tongueTwister:
+      return 'assets/images/ui/speaker.webp';
+    case LiteraryContentType.other:
+      return 'assets/images/reward_star_clean.webp';
+  }
+}
+
 class _ContentCard extends StatelessWidget {
   final LiteraryContentItem item;
   final bool loadingAudio;
+  final bool playingAudio;
   final VoidCallback? onPlay;
 
   const _ContentCard({
     required this.item,
     required this.loadingAudio,
+    required this.playingAudio,
     required this.onPlay,
   });
 
@@ -303,7 +477,7 @@ class _ContentCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(15),
                 ),
                 alignment: Alignment.center,
-                child: Text(item.type.emoji, style: const TextStyle(fontSize: 24)),
+                child: Image.asset(_literaryTypeAsset(item.type), width: 32, height: 32, fit: BoxFit.contain),
               ),
               const SizedBox(width: 11),
               Expanded(
@@ -340,7 +514,7 @@ class _ContentCard extends StatelessWidget {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.volume_up_rounded),
+                      : Icon(playingAudio ? Icons.stop_rounded : Icons.volume_up_rounded),
                 ),
             ],
           ),
@@ -375,11 +549,13 @@ class _ContentCard extends StatelessWidget {
 
 class _FilterChip extends StatelessWidget {
   final String label;
+  final String? asset;
   final bool selected;
   final VoidCallback onTap;
 
   const _FilterChip({
     required this.label,
+    this.asset,
     required this.selected,
     required this.onTap,
   });
@@ -400,13 +576,22 @@ class _FilterChip extends StatelessWidget {
               color: selected ? const Color(0xFF8F65D8) : AppColors.trackGrey,
             ),
           ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected ? Colors.white : AppColors.deepBlue,
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (asset != null) ...[
+                Image.asset(asset!, width: 22, height: 22, fit: BoxFit.contain),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.white : AppColors.deepBlue,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                ),
+              ),
+            ],
           ),
         ),
       ),

@@ -9,6 +9,7 @@ import '../services/app_locale_controller.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_text_field.dart';
 import '../widgets/parent_pin_dialog.dart';
+import '../widgets/magic_ui.dart';
 import 'legal_document_screen.dart';
 
 class ParentSettingsScreen extends StatefulWidget {
@@ -105,10 +106,10 @@ class _ParentSettingsScreenState extends State<ParentSettingsScreen> {
                   title: Text(AppStrings.languageName(sheetContext, code)),
                   secondary: Text(
                     switch (code) {
-                      'ru' => '🇷🇺',
-                      'kk' => '🇰🇿',
-                      'en' => '🇬🇧',
-                      _ => '🇨🇳',
+                      'ru' => 'RU',
+                      'kk' => 'KZ',
+                      'en' => 'EN',
+                      _ => '中',
                     },
                     style: const TextStyle(fontSize: 26),
                   ),
@@ -421,7 +422,7 @@ class _ParentSettingsScreenState extends State<ParentSettingsScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const ZenviaLoadingScreen();
           }
           if (snapshot.hasError) {
             return Center(child: Text(snapshot.error.toString()));

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_repository.dart';
 import '../l10n/app_strings.dart';
+import '../widgets/magic_ui.dart';
 import 'play_cave_screen.dart';
 
 /// Экран-перекрёсток после выбора языка.
@@ -23,6 +24,7 @@ class AdventureChoiceScreen extends StatefulWidget {
 
 class _AdventureChoiceScreenState extends State<AdventureChoiceScreen> {
   String? _levelDragonUrl;
+  bool _loadingDragon = true;
 
   @override
   void initState() {
@@ -34,18 +36,30 @@ class _AdventureChoiceScreenState extends State<AdventureChoiceScreen> {
     try {
       final url = await widget.repository.getLevelDragonUrl();
       if (!mounted) return;
-      setState(() => _levelDragonUrl = url);
+      await precacheBackendImages(context, <String?>[url]);
+      if (!mounted) return;
+      setState(() {
+        _levelDragonUrl = url;
+        _loadingDragon = false;
+      });
     } catch (_) {
+      if (mounted) setState(() => _loadingDragon = false);
       // Fallback asset ниже.
     }
   }
 
   void _select(AdventureDestination destination) {
-    Navigator.of(context).pop(destination);
+    DebouncedTapGuard.run(
+      'adventure-${destination.name}',
+      () => Navigator.of(context).pop(destination),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingDragon) {
+      return const Scaffold(body: ZenviaLoadingScreen());
+    }
     return Scaffold(
       body: Stack(
         fit: StackFit.expand,
@@ -107,14 +121,6 @@ class _AdventureChoiceScreenState extends State<AdventureChoiceScreen> {
                               onTap: () => Navigator.of(context).pop(),
                             ),
                             const Spacer(),
-                            Icon(
-                              Icons.auto_awesome_rounded,
-                              color: Colors.white,
-                              size: (28 * uiScale).clamp(24.0, 34.0),
-                              shadows: const [
-                                Shadow(color: Color(0x66000000), blurRadius: 8),
-                              ],
-                            ),
                           ],
                         ),
                       ),
@@ -205,9 +211,12 @@ class _AdventureChoiceScreenState extends State<AdventureChoiceScreen> {
                                   floatDuration: const Duration(milliseconds: 4300),
                                   floatPhase: 2.1,
                                   onTap: () {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (_) => const PlayCaveScreen(),
+                                    DebouncedTapGuard.run(
+                                      'adventure-play-cave',
+                                      () => Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) => const PlayCaveScreen(),
+                                        ),
                                       ),
                                     );
                                   },
@@ -295,42 +304,10 @@ class _AdventureChoiceScreenState extends State<AdventureChoiceScreen> {
                           },
                         ),
                       ),
-                      SizedBox(height: 4 * uiScale),
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: math.min(width * .78, 370),
-                          minHeight: mottoHeight,
-                        ),
-                        child: Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 18 * uiScale,
-                            vertical: 9 * uiScale,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: .30),
-                            borderRadius: BorderRadius.circular(28 * uiScale),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: .45),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              context.tr('learnPlayGrow'),
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: (13.5 * uiScale).clamp(12.0, 16.0),
-                                fontWeight: FontWeight.w900,
-                                shadows: const [
-                                  Shadow(color: Color(0x66000000), blurRadius: 5),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+                      // Нижний декоративный слоган убран. Сохраняем
+                      // прежнюю высоту, чтобы позиции пещер, дракончика и
+                      // таблички не менялись на уже настроенных экранах.
+                      SizedBox(height: 4 * uiScale + mottoHeight),
                     ],
                   ),
                 );

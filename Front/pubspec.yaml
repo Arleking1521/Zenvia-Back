@@ -1,7 +1,7 @@
 name: zenvia_kids
 description: Приложение для изучения языков для детей (RU/KZ/EN/CN)
 publish_to: 'none'
-version: 0.1.1+2
+version: 1.0.0
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -36,6 +36,13 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/images/games/firefly/
+    - assets/images/games/catch_stars/
+    - assets/images/games/find_pair/
+    - assets/images/games/connect_dots/
+    - assets/images/games/puzzle/
+    - assets/images/games/pizza/
+    - assets/images/ui/
     - assets/audio/
 
 flutter_launcher_icons:

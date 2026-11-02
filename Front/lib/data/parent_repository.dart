@@ -43,7 +43,10 @@ abstract class ParentRepository {
   Future<SubscriptionInfo?> getCurrentSubscription();
   Future<SubscriptionInfo> startTrial();
   Future<SubscriptionInfo> disableAutoRenew(int subscriptionId);
-  Future<SubscriptionInfo> verifyGooglePlayPurchase(String purchaseToken);
+  Future<SubscriptionInfo> verifyGooglePlayPurchase(
+    String purchaseToken, {
+    String? promoCode,
+  });
   Future<SubscriptionAccessStatus> getSubscriptionAccessStatus();
   Future<SubscriptionInfo> createSubscription(
     int tariffId, {

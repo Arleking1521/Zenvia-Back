@@ -1,5 +1,188 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+
+
+
+/// Защита от случайного двойного клика на навигационных/действующих кнопках.
+/// Не используется внутри игр, где быстрые повторные тапы являются механикой.
+class DebouncedTapGuard {
+  static final Map<Object, DateTime> _lastTap = <Object, DateTime>{};
+  static final Set<Object> _running = <Object>{};
+
+  static bool accept(
+    Object key, {
+    Duration interval = const Duration(milliseconds: 550),
+  }) {
+    final now = DateTime.now();
+    final previous = _lastTap[key];
+    if (previous != null && now.difference(previous) < interval) return false;
+    _lastTap[key] = now;
+    return true;
+  }
+
+  static void run(
+    Object key,
+    VoidCallback action, {
+    Duration interval = const Duration(milliseconds: 550),
+  }) {
+    if (!accept(key, interval: interval)) return;
+    action();
+  }
+
+  static Future<void> runAsync(
+    Object key,
+    FutureOr<void> Function() action,
+  ) async {
+    if (_running.contains(key) || !accept(key)) return;
+    _running.add(key);
+    try {
+      await action();
+    } finally {
+      _running.remove(key);
+    }
+  }
+}
+
+/// Фон с облаками/островами из экрана выбора темы.
+/// Используется в связанных учебных экранах для визуальной целостности.
+class CloudWorldBackground extends StatelessWidget {
+  final Widget child;
+
+  const CloudWorldBackground({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const Image(
+          image: AssetImage('assets/images/world_map_sky.webp'),
+          fit: BoxFit.cover,
+          alignment: Alignment.topCenter,
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                const Color(0xFF008BCB).withValues(alpha: .12),
+                Colors.transparent,
+                Colors.white.withValues(alpha: .08),
+              ],
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
+}
+
+/// Маленькая иллюстрация вместо системного emoji.
+class AppArtIcon extends StatelessWidget {
+  final String asset;
+  final double size;
+
+  const AppArtIcon({
+    super.key,
+    required this.asset,
+    this.size = 48,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      asset,
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
+    );
+  }
+}
+
+/// Единый полноэкранный загрузочный экран Zenvia Kids.
+/// Используется на всех data-driven экранах, чтобы интерфейс не появлялся
+/// раньше backend-картинок и визуально совпадал со стартовым splash.
+class ZenviaLoadingScreen extends StatelessWidget {
+  const ZenviaLoadingScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: const Color(0xFF7ED8F4),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          const Image(
+            image: AssetImage('assets/images/home_language_bg.webp'),
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.blue.withValues(alpha: .06),
+                  Colors.transparent,
+                  Colors.white.withValues(alpha: .04),
+                ],
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/images/zenvia_kids_logo.webp',
+                    width: 270,
+                    fit: BoxFit.contain,
+                  ),
+                  const SizedBox(height: 22),
+                  const CircularProgressIndicator(color: Colors.white),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Предварительно помещает backend-картинки в Flutter ImageCache.
+/// Все URL грузятся параллельно; одна битая/медленная картинка не блокирует
+/// экран навсегда — после [timeout] соответствующий Image.network покажет
+/// свой errorBuilder/fallback.
+Future<void> precacheBackendImages(
+  BuildContext context,
+  Iterable<String?> urls, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final normalized = <String>{};
+  for (final raw in urls) {
+    final url = raw?.trim();
+    if (url != null && url.isNotEmpty) normalized.add(url);
+  }
+  if (normalized.isEmpty) return;
+
+  await Future.wait(
+    normalized.map((url) async {
+      try {
+        await precacheImage(NetworkImage(url), context).timeout(timeout);
+      } catch (_) {
+        // Ошибка конкретной картинки не должна блокировать весь экран.
+      }
+    }),
+  );
+}
 
 class FantasyBackground extends StatelessWidget {
   final Widget child;
@@ -159,7 +342,12 @@ class MagicPrimaryButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: onPressed,
+          onTap: onPressed == null
+              ? null
+              : () => DebouncedTapGuard.run(
+                    'magic-primary:${identityHashCode(this)}',
+                    onPressed!,
+                  ),
           borderRadius: BorderRadius.circular(26),
           child: Padding(
             padding: EdgeInsets.symmetric(
@@ -198,7 +386,7 @@ class ZenviaLogo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Image.asset(
-      'assets/images/zenvia_kids_logo.png',
+      'assets/images/zenvia_kids_logo.webp',
       width: 220 * scale,
       fit: BoxFit.contain,
       filterQuality: FilterQuality.high,

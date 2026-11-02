@@ -49,16 +49,16 @@ extension MixedLearnedGameTypeX on MixedLearnedGameType {
     }
   }
 
-  String get emoji {
+  String get asset {
     switch (this) {
       case MixedLearnedGameType.imageChoice:
-        return '🖼️';
+        return 'assets/images/ui/game_choose_picture.webp';
       case MixedLearnedGameType.wordChoice:
-        return '🔤';
+        return 'assets/images/ui/book.webp';
       case MixedLearnedGameType.audioChoice:
-        return '🔊';
+        return 'assets/images/ui/game_listen_choose.webp';
       case MixedLearnedGameType.matching:
-        return '🧩';
+        return 'assets/images/ui/game_find_pair.webp';
     }
   }
 }
@@ -83,7 +83,18 @@ class _LearnedWordsGamesScreenState extends State<LearnedWordsGamesScreen> {
   void initState() {
     super.initState();
     BackgroundMusicService.instance.silence(_musicSilenceToken);
-    _future = widget.repository.getLearnedWordsAllLanguages();
+    _future = _loadWords();
+  }
+
+  Future<List<LearnedWord>> _loadWords() async {
+    final words = await widget.repository.getLearnedWordsAllLanguages();
+    if (mounted) {
+      await precacheBackendImages(
+        context,
+        words.map((word) => word.imageUrl),
+      );
+    }
+    return words;
   }
 
   @override
@@ -93,7 +104,7 @@ class _LearnedWordsGamesScreenState extends State<LearnedWordsGamesScreen> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = widget.repository.getLearnedWordsAllLanguages());
+    setState(() => _future = _loadWords());
     await _future;
   }
 
@@ -150,9 +161,7 @@ class _LearnedWordsGamesScreenState extends State<LearnedWordsGamesScreen> {
             future: _future,
             builder: (context, snapshot) {
               if (snapshot.connectionState != ConnectionState.done) {
-                return const Center(
-                  child: CircularProgressIndicator(color: AppColors.primary),
-                );
+                return const ZenviaLoadingScreen();
               }
 
               if (snapshot.hasError) {
@@ -163,7 +172,7 @@ class _LearnedWordsGamesScreenState extends State<LearnedWordsGamesScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('🎮', style: TextStyle(fontSize: 48)),
+                          const AppArtIcon(asset: 'assets/images/ui/gamepad.webp', size: 58),
                           const SizedBox(height: 10),
                           Text(
                             context.tr('learnedWordsLoadFailed'),
@@ -221,7 +230,7 @@ class _LearnedWordsGamesScreenState extends State<LearnedWordsGamesScreen> {
                       gradient: AppColors.magicGradient,
                       child: Column(
                         children: [
-                          const Text('🎮', style: TextStyle(fontSize: 48)),
+                          const AppArtIcon(asset: 'assets/images/ui/gamepad.webp', size: 58),
                           const SizedBox(height: 5),
                           Text(
                             context.tr('allLearnedWords'),
@@ -353,7 +362,7 @@ class _MixedGameCard extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(type.emoji, style: const TextStyle(fontSize: 42)),
+              Image.asset(type.asset, width: 52, height: 52, fit: BoxFit.contain),
               const SizedBox(height: 7),
               Text(
                 type.title(context),
@@ -399,6 +408,8 @@ class MixedLearnedGameScreen extends StatefulWidget {
 class _MixedLearnedGameScreenState extends State<MixedLearnedGameScreen> {
   final Random _random = Random();
   final AudioPlayer _audioPlayer = AudioPlayer();
+  String? _playingAudioUrl;
+  StreamSubscription<void>? _audioCompleteSubscription;
   final Dio _dio = Dio();
   final Map<String, Uint8List> _audioCache = <String, Uint8List>{};
 
@@ -421,6 +432,10 @@ class _MixedLearnedGameScreenState extends State<MixedLearnedGameScreen> {
   @override
   void initState() {
     super.initState();
+    _audioCompleteSubscription = _audioPlayer.onPlayerComplete.listen((_) {
+      if (!mounted) return;
+      setState(() => _playingAudioUrl = null);
+    });
     _pool = List<LearnedWord>.from(widget.words)..shuffle(_random);
     if (widget.type == MixedLearnedGameType.matching) {
       _prepareMatching();
@@ -431,6 +446,7 @@ class _MixedLearnedGameScreenState extends State<MixedLearnedGameScreen> {
 
   @override
   void dispose() {
+    _audioCompleteSubscription?.cancel();
     _audioPlayer.dispose();
     super.dispose();
   }
@@ -525,6 +541,11 @@ class _MixedLearnedGameScreenState extends State<MixedLearnedGameScreen> {
   Future<void> _playAudio() async {
     final url = _target?.audioUrl?.trim();
     if (url == null || url.isEmpty || _audioLoading) return;
+    if (_playingAudioUrl == url) {
+      await _audioPlayer.stop();
+      if (mounted) setState(() => _playingAudioUrl = null);
+      return;
+    }
     setState(() => _audioLoading = true);
     try {
       var bytes = _audioCache[url];
@@ -543,6 +564,7 @@ class _MixedLearnedGameScreenState extends State<MixedLearnedGameScreen> {
         BytesSource(bytes),
         volume: AudioSettingsService.instance.voiceVolume,
       );
+      if (mounted) setState(() => _playingAudioUrl = url);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -645,7 +667,7 @@ class _MixedLearnedGameScreenState extends State<MixedLearnedGameScreen> {
 
     final target = _target;
     if (target == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(body: ZenviaLoadingScreen());
     }
 
     return Scaffold(
@@ -659,14 +681,23 @@ class _MixedLearnedGameScreenState extends State<MixedLearnedGameScreen> {
                   children: [
                     _RoundBackButton(onTap: () => Navigator.of(context).pop()),
                     Expanded(
-                      child: Text(
-                        '${widget.type.emoji} ${widget.type.title(context)}',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.deepBlue,
-                        ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Image.asset(widget.type.asset, width: 30, height: 30, fit: BoxFit.contain),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              widget.type.title(context),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 19,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.deepBlue,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     Text(
@@ -700,6 +731,7 @@ class _MixedLearnedGameScreenState extends State<MixedLearnedGameScreen> {
                       type: widget.type,
                       target: target,
                       audioLoading: _audioLoading,
+                      audioPlaying: _playingAudioUrl == target.audioUrl?.trim(),
                       onAudio: _playAudio,
                     ),
                     const SizedBox(height: 16),
@@ -823,12 +855,14 @@ class _QuestionPrompt extends StatelessWidget {
   final MixedLearnedGameType type;
   final LearnedWord target;
   final bool audioLoading;
+  final bool audioPlaying;
   final VoidCallback onAudio;
 
   const _QuestionPrompt({
     required this.type,
     required this.target,
     required this.audioLoading,
+    required this.audioPlaying,
     required this.onAudio,
   });
 
@@ -862,8 +896,8 @@ class _QuestionPrompt extends StatelessWidget {
                         padding: EdgeInsets.all(42),
                         child: CircularProgressIndicator(strokeWidth: 4),
                       )
-                    : const Icon(
-                        Icons.volume_up_rounded,
+                    : Icon(
+                        audioPlaying ? Icons.stop_rounded : Icons.volume_up_rounded,
                         size: 58,
                         color: AppColors.accentBlue,
                       ),
@@ -924,7 +958,7 @@ class _AnswerOption extends StatelessWidget {
           child: type == MixedLearnedGameType.wordChoice
               ? Row(
                   children: [
-                    Text(word.language.flagEmoji, style: const TextStyle(fontSize: 25)),
+                    Container(width: 38, height: 30, alignment: Alignment.center, decoration: BoxDecoration(color: AppColors.bottomNavSelectedBg, borderRadius: BorderRadius.circular(10)), child: Text(word.language.flagEmoji, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.deepBlue))),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -958,7 +992,7 @@ class _NetworkWordImage extends StatelessWidget {
     if (value == null || value.isEmpty) {
       return SizedBox(
         height: height,
-        child: const Center(child: Text('🖼️', style: TextStyle(fontSize: 55))),
+        child: Center(child: Image.asset('assets/images/ui/game_choose_picture.webp', width: 64, height: 64, fit: BoxFit.contain)),
       );
     }
     return ClipRRect(
@@ -970,7 +1004,7 @@ class _NetworkWordImage extends StatelessWidget {
         fit: BoxFit.contain,
         errorBuilder: (_, __, ___) => SizedBox(
           height: height,
-          child: const Center(child: Text('🖼️', style: TextStyle(fontSize: 55))),
+          child: Center(child: Image.asset('assets/images/ui/game_choose_picture.webp', width: 64, height: 64, fit: BoxFit.contain)),
         ),
       ),
     );
@@ -1078,7 +1112,7 @@ class _RoundBackButton extends StatelessWidget {
       color: Colors.white.withValues(alpha: .92),
       shape: const CircleBorder(),
       child: InkWell(
-        onTap: onTap,
+        onTap: () => DebouncedTapGuard.run('learned-games-back', onTap),
         customBorder: const CircleBorder(),
         child: const SizedBox(
           width: 44,

@@ -34,16 +34,16 @@ extension GameTypeX on GameType {
     }
   }
 
-  String get emoji {
+  String get assetPath {
     switch (this) {
       case GameType.imageChoice:
-        return '🖼️';
+        return 'assets/images/ui/game_choose_picture.webp';
       case GameType.wordChoice:
-        return '🔤';
+        return 'assets/images/ui/book.webp';
       case GameType.audioChoice:
-        return '🔊';
+        return 'assets/images/ui/game_listen_choose.webp';
       case GameType.matching:
-        return '🧩';
+        return 'assets/images/ui/game_find_pair.webp';
     }
   }
 

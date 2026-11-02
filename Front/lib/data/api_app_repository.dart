@@ -129,15 +129,7 @@ class ApiAppRepository implements AppRepository {
     return result;
   }
 
-  @override
-  Future<List<LiteraryContentItem>> getLiteraryContent(
-    AppLanguage language,
-  ) async {
-    final rows = await _getList(
-      ApiConfig.api('literary-content/'),
-      queryParameters: {'language': language.apiCode},
-    );
-
+  List<LiteraryContentItem> _parseLiteraryContentRows(List<dynamic> rows) {
     final result = <LiteraryContentItem>[];
     for (final raw in rows) {
       final row = _asMap(raw);
@@ -170,8 +162,68 @@ class ApiAppRepository implements AppRepository {
         ),
       );
     }
-
     return result;
+  }
+
+  @override
+  Future<List<LiteraryContentItem>> getLiteraryContent(
+    AppLanguage language,
+  ) async {
+    final rows = await _getList(
+      ApiConfig.api('literary-content/'),
+      queryParameters: {'language': language.apiCode},
+    );
+    return _parseLiteraryContentRows(rows);
+  }
+
+  @override
+  Future<LiteraryContentPage> getLiteraryContentPage(
+    AppLanguage language, {
+    LiteraryContentType? type,
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    try {
+      final query = <String, dynamic>{
+        'language': language.apiCode,
+        'page': page,
+        'page_size': pageSize,
+      };
+      if (type != null && type != LiteraryContentType.other) {
+        query['content_type'] = type.apiCode;
+      }
+
+      final response = await client.dio.get<dynamic>(
+        ApiConfig.api('literary-content/'),
+        queryParameters: query,
+      );
+      final data = _asMap(response.data);
+      if (data == null || data['results'] is! List) {
+        throw const AppApiException('Сервер вернул неожиданный формат страницы');
+      }
+
+      final rows = data['results'] as List;
+      final availableTypes = <LiteraryContentType>{};
+      final rawTypes = data['available_content_types'];
+      if (rawTypes is List) {
+        for (final rawType in rawTypes) {
+          final type = LiteraryContentTypeX.fromApiCode(rawType?.toString());
+          if (type != LiteraryContentType.other) {
+            availableTypes.add(type);
+          }
+        }
+      }
+
+      return LiteraryContentPage(
+        items: _parseLiteraryContentRows(rows),
+        totalCount: _asInt(data['count']),
+        hasNext: data['next'] != null,
+        page: page,
+        availableTypes: availableTypes,
+      );
+    } on DioException catch (e) {
+      throw AppApiException(_dioMessage(e));
+    }
   }
 
   @override
@@ -303,11 +355,6 @@ class ApiAppRepository implements AppRepository {
 
     final conceptRows = await _getList(ApiConfig.api('concepts/'));
     final wordRows = await _getList(ApiConfig.api('words/'));
-    final progressRows = await _getList(
-      ApiConfig.api('progress/'),
-      queryParameters: {'language': selectedLanguage.apiCode},
-    );
-
     final wordsByConcept = <int, List<Map<String, dynamic>>>{};
     for (final raw in wordRows) {
       final row = _asMap(raw);
@@ -315,15 +362,6 @@ class ApiAppRepository implements AppRepository {
       final conceptId = _asInt(row['concept']);
       if (conceptId <= 0) continue;
       wordsByConcept.putIfAbsent(conceptId, () => []).add(row);
-    }
-
-    final learnedConceptIds = <int>{};
-    for (final raw in progressRows) {
-      final row = _asMap(raw);
-      if (row == null) continue;
-      if (_asInt(row['mastery']) >= 5) {
-        learnedConceptIds.add(_asInt(row['concept']));
-      }
     }
 
     final conceptsByTopic = <int, List<Map<String, dynamic>>>{};
@@ -355,6 +393,15 @@ class ApiAppRepository implements AppRepository {
       )..sort(
           (a, b) => _asInt(a['position']).compareTo(_asInt(b['position'])),
         );
+
+      final learnedConceptIds = <int>{};
+      final rawLearnedIds = topicRow['learned_concept_ids'];
+      if (rawLearnedIds is List) {
+        for (final rawId in rawLearnedIds) {
+          final id = _asInt(rawId);
+          if (id > 0) learnedConceptIds.add(id);
+        }
+      }
 
       final items = <WordItem>[];
 
@@ -423,11 +470,12 @@ class ApiAppRepository implements AppRepository {
           number: i + 1,
           title: topicRow['title']?.toString() ?? 'Тема',
           description: description,
-          emoji: '📚',
+          emoji: '',
           iconUrl: icon.isEmpty ? null : icon,
           color: topicColors[i % topicColors.length],
           words: items,
           learnedCount: learnedCount,
+          learnedWordIds: learnedConceptIds.map((id) => id.toString()).toSet(),
         ),
       );
     }
@@ -809,23 +857,23 @@ class ApiAppRepository implements AppRepository {
   String _achievementEmoji(String condition) {
     switch (condition) {
       case 'words_learned':
-        return '📚';
+        return '';
       case 'games_completed':
-        return '🎮';
+        return '';
       case 'correct_answers':
-        return '✅';
+        return '';
       case 'perfect_games':
-        return '🏆';
+        return '';
       case 'poems_listened':
-        return '🎧';
+        return '';
       case 'proverbs_learned':
-        return '💬';
+        return '';
       case 'topics_completed':
-        return '🌟';
+        return '';
       case 'xp_earned':
-        return '⚡';
+        return '';
       default:
-        return '🏅';
+        return '';
     }
   }
 

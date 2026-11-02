@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../widgets/magic_ui.dart';
 
 class PuzzleGameScreen extends StatefulWidget {
   const PuzzleGameScreen({super.key});
@@ -10,24 +13,79 @@ class PuzzleGameScreen extends StatefulWidget {
 }
 
 class _PuzzleGameScreenState extends State<PuzzleGameScreen> {
-  static const List<String> _puzzleImages = <String>[
-    'assets/images/games/puzzle/dragon_hero.webp',
-    'assets/images/games/puzzle/home_banner_fantasy_bg.webp',
-    'assets/images/games/puzzle/magic_map.webp',
-    'assets/images/games/puzzle/world_map_sky.webp',
-  ];
+  static const String _puzzleAssetsPrefix =
+      'assets/images/games/puzzle/';
+
+  static const Set<String> _supportedImageExtensions = <String>{
+    '.png',
+    '.webp',
+    '.jpg',
+    '.jpeg',
+  };
 
   final math.Random _random = math.Random();
 
   _PuzzleDifficulty? _difficulty;
-  late String _imageAsset;
+  List<String> _puzzleImages = <String>[];
+  String? _imageAsset;
+  bool _loadingPuzzleImages = true;
+  String? _puzzleImagesError;
   List<int> _pieces = <int>[];
   int? _draggingSlot;
 
   @override
   void initState() {
     super.initState();
-    _imageAsset = _puzzleImages.first;
+    _loadPuzzleImages();
+  }
+
+  Future<void> _loadPuzzleImages() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final assets = manifest
+          .listAssets()
+          .where((asset) => asset.startsWith(_puzzleAssetsPrefix))
+          .where((asset) {
+            final lower = asset.toLowerCase();
+            return _supportedImageExtensions.any(lower.endsWith);
+          })
+          .toList()
+        ..sort();
+
+      if (!mounted) return;
+
+      setState(() {
+        _puzzleImages = assets;
+        _imageAsset = assets.isEmpty ? null : assets.first;
+        _loadingPuzzleImages = false;
+        _puzzleImagesError = assets.isEmpty
+            ? 'В папке пазлов пока нет изображений.'
+            : null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingPuzzleImages = false;
+        _puzzleImagesError = 'Не удалось загрузить картинки пазлов.';
+      });
+    }
+  }
+
+  String _pickPuzzleImage() {
+    if (_puzzleImages.isEmpty) {
+      throw StateError('Puzzle image assets are not available.');
+    }
+
+    if (_puzzleImages.length == 1) {
+      return _puzzleImages.first;
+    }
+
+    final previous = _imageAsset;
+    var next = _puzzleImages[_random.nextInt(_puzzleImages.length)];
+    while (next == previous) {
+      next = _puzzleImages[_random.nextInt(_puzzleImages.length)];
+    }
+    return next;
   }
 
   void _selectDifficulty(_PuzzleDifficulty difficulty) {
@@ -41,7 +99,7 @@ class _PuzzleGameScreenState extends State<PuzzleGameScreen> {
     final difficulty = _difficulty;
     if (difficulty == null) return;
 
-    _imageAsset = _puzzleImages[_random.nextInt(_puzzleImages.length)];
+    _imageAsset = _pickPuzzleImage();
     _pieces = List<int>.generate(difficulty.pieceCount, (index) => index);
 
     do {
@@ -112,14 +170,14 @@ class _PuzzleGameScreenState extends State<PuzzleGameScreen> {
                 child: AspectRatio(
                   aspectRatio: difficulty.columns / difficulty.rows,
                   child: Image.asset(
-                    _imageAsset,
+                    _imageAsset!,
                     fit: BoxFit.cover,
                   ),
                 ),
               ),
               const SizedBox(height: 14),
               const Text(
-                'Пазл собран! 🎉',
+                'Пазл собран!',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Color(0xFF124C89),
@@ -192,6 +250,65 @@ class _PuzzleGameScreenState extends State<PuzzleGameScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingPuzzleImages) {
+      return const Scaffold(body: ZenviaLoadingScreen());
+    }
+
+    if (_puzzleImagesError != null || _puzzleImages.isEmpty) {
+      return Scaffold(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            const Image(
+              image: AssetImage('assets/images/adventure_bg.webp'),
+              fit: BoxFit.cover,
+            ),
+            SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: MagicCard(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.image_not_supported_rounded,
+                          size: 52,
+                          color: Color(0xFF8C63D7),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          _puzzleImagesError ??
+                              'В папке пазлов пока нет изображений.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFF124C89),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        FilledButton(
+                          onPressed: () {
+                            setState(() {
+                              _loadingPuzzleImages = true;
+                              _puzzleImagesError = null;
+                            });
+                            _loadPuzzleImages();
+                          },
+                          child: const Text('Повторить'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final difficulty = _difficulty;
 
     return Scaffold(
@@ -259,7 +376,7 @@ class _PuzzleGameScreenState extends State<PuzzleGameScreen> {
                   width: 72,
                   height: 58,
                   child: Image.asset(
-                    _imageAsset,
+                    _imageAsset!,
                     fit: BoxFit.cover,
                   ),
                 ),
@@ -351,7 +468,7 @@ class _PuzzleGameScreenState extends State<PuzzleGameScreen> {
                             final highlighted = candidateData.isNotEmpty;
 
                             final piece = _PuzzlePiece(
-                              imageAsset: _imageAsset,
+                              imageAsset: _imageAsset!,
                               pieceIndex: pieceIndex,
                               rows: difficulty.rows,
                               columns: difficulty.columns,
@@ -402,7 +519,7 @@ class _PuzzleGameScreenState extends State<PuzzleGameScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Зажми деталь и перетащи её на другую 🧩',
+          'Зажми деталь и перетащи её на другую',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: Colors.white.withValues(alpha: .94),
@@ -727,7 +844,7 @@ class _CircleButton extends StatelessWidget {
       shape: const CircleBorder(),
       child: IconButton(
         tooltip: tooltip,
-        onPressed: onPressed,
+        onPressed: () => DebouncedTapGuard.run('puzzle-header:$tooltip', onPressed),
         icon: Icon(icon, color: Colors.white),
       ),
     );

@@ -43,13 +43,13 @@ extension AppLanguageX on AppLanguage {
   String get flagEmoji {
     switch (this) {
       case AppLanguage.english:
-        return '🇬🇧';
+        return 'EN';
       case AppLanguage.chinese:
-        return '🇨🇳';
+        return '中';
       case AppLanguage.kazakh:
-        return '🇰🇿';
+        return 'KZ';
       case AppLanguage.russian:
-        return '🇷🇺';
+        return 'RU';
     }
   }
 

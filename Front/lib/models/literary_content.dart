@@ -9,6 +9,21 @@ enum LiteraryContentType {
 }
 
 extension LiteraryContentTypeX on LiteraryContentType {
+  String get apiCode {
+    switch (this) {
+      case LiteraryContentType.poem:
+        return 'poem';
+      case LiteraryContentType.proverb:
+        return 'proverb';
+      case LiteraryContentType.riddle:
+        return 'riddle';
+      case LiteraryContentType.tongueTwister:
+        return 'tongue_twister';
+      case LiteraryContentType.other:
+        return '';
+    }
+  }
+
   String get title {
     switch (this) {
       case LiteraryContentType.poem:
@@ -27,15 +42,15 @@ extension LiteraryContentTypeX on LiteraryContentType {
   String get emoji {
     switch (this) {
       case LiteraryContentType.poem:
-        return '📜';
+        return '';
       case LiteraryContentType.proverb:
-        return '💬';
+        return '';
       case LiteraryContentType.riddle:
-        return '❓';
+        return '';
       case LiteraryContentType.tongueTwister:
-        return '👅';
+        return '';
       case LiteraryContentType.other:
-        return '✨';
+        return '';
     }
   }
 
@@ -76,5 +91,22 @@ class LiteraryContentItem {
     this.imageUrl,
     this.audioUrl,
     this.author,
+  });
+}
+
+
+class LiteraryContentPage {
+  final List<LiteraryContentItem> items;
+  final int totalCount;
+  final bool hasNext;
+  final int page;
+  final Set<LiteraryContentType> availableTypes;
+
+  const LiteraryContentPage({
+    required this.items,
+    required this.totalCount,
+    required this.hasNext,
+    required this.page,
+    this.availableTypes = const <LiteraryContentType>{},
   });
 }

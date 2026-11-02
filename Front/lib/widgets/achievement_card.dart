@@ -26,7 +26,7 @@ class AchievementCard extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(34),
               child: Image.asset(
-                'assets/images/achievement_cloud_card.png',
+                'assets/images/achievement_cloud_card.webp',
                 fit: BoxFit.fill,
               ),
             ),
@@ -187,9 +187,11 @@ class _AchievementIllustration extends StatelessWidget {
         color: achievement.iconBg.withValues(alpha: .55),
         borderRadius: BorderRadius.circular(22),
       ),
-      child: Text(
-        achievement.emoji,
-        style: const TextStyle(fontSize: 42),
+      child: Image.asset(
+        'assets/images/reward_star_clean.webp',
+        width: 58,
+        height: 58,
+        fit: BoxFit.contain,
       ),
     );
   }

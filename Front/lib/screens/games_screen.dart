@@ -57,10 +57,17 @@ class _GamesScreenState extends State<GamesScreen> {
       widget.appRepository.getTopics(),
       widget.appRepository.getSelectedLanguage(),
     ]);
-    return _GamesData(
+    final data = _GamesData(
       topics: values[0] as List<Topic>,
       language: values[1] as AppLanguage,
     );
+    if (mounted) {
+      await precacheBackendImages(
+        context,
+        data.topics.map((topic) => topic.iconUrl),
+      );
+    }
+    return data;
   }
 
   Future<void> _chooseTopic(GameType gameType) async {
@@ -134,7 +141,7 @@ class _GamesScreenState extends State<GamesScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(item.title, style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.deepBlue)),
-                                  Text(context.tr('wordsSimpleCount', {'count': item.totalCount}), style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                                  Text(context.tr('studiedWordsAvailableCount', {'count': item.learnedCount}), style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                                 ],
                               ),
                             ),
@@ -221,7 +228,7 @@ class _GamesScreenState extends State<GamesScreen> {
           future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+              return const ZenviaLoadingScreen();
             }
             if (snapshot.hasError) {
               return Center(child: MagicPrimaryButton(label: context.tr('retry'), onPressed: () => setState(() { _future = _load(); })));
@@ -300,47 +307,80 @@ class _GamesScreenState extends State<GamesScreen> {
                                 borderRadius: BorderRadius.circular(28),
                                 boxShadow: [BoxShadow(color: colors.last.withValues(alpha: .25), blurRadius: 16, offset: const Offset(0, 6))],
                               ),
-                              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Container(
-                                    width: 62,
-                                    height: 62,
-                                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: .92), shape: BoxShape.circle),
-                                    alignment: Alignment.center,
-                                    child: Text(type.emoji, style: const TextStyle(fontSize: 32)),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    _gameTitle(context, type),
-                                    textAlign: TextAlign.center,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 14,
-                                      height: 1.15,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Expanded(
-                                    child: Center(
-                                      child: Text(
-                                        _description(context, type),
-                                        textAlign: TextAlign.center,
-                                        maxLines: 3,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 10,
-                                          height: 1.2,
+                              padding: EdgeInsets.zero,
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final cardHeight = constraints.maxHeight;
+                                  return Stack(
+                                    alignment: Alignment.topCenter,
+                                    children: [
+                                      Positioned(
+                                        top: cardHeight * .14,
+                                        left: 0,
+                                        right: 0,
+                                        child: Center(
+                                          child: Container(
+                                            width: 62,
+                                            height: 62,
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withValues(alpha: .92),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Image.asset(
+                                              type.assetPath,
+                                              width: 40,
+                                              height: 40,
+                                              fit: BoxFit.contain,
+                                            ),
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                ],
+                                      Positioned(
+                                        top: cardHeight * .55,
+                                        left: 12,
+                                        right: 12,
+                                        height: 40,
+                                        child: Align(
+                                          alignment: Alignment.topCenter,
+                                          child: Text(
+                                            _gameTitle(context, type),
+                                            textAlign: TextAlign.center,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w900,
+                                              fontSize: 14,
+                                              height: 1.15,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        top: cardHeight * .74,
+                                        left: 10,
+                                        right: 10,
+                                        height: 34,
+                                        child: Align(
+                                          alignment: Alignment.topCenter,
+                                          child: Text(
+                                            _description(context, type),
+                                            textAlign: TextAlign.center,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w500,
+                                              height: 1.2,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
                               ),
                             ),
                           ),
@@ -422,8 +462,8 @@ class _TopicIcon extends StatelessWidget {
         color: topic.color.withValues(alpha: .15),
         alignment: Alignment.center,
         child: url != null && url.isNotEmpty
-            ? Image.network(url, fit: BoxFit.cover, width: 52, height: 52, errorBuilder: (_, __, ___) => Text(topic.emoji, style: const TextStyle(fontSize: 28)))
-            : Text(topic.emoji, style: const TextStyle(fontSize: 28)),
+            ? Image.network(url, fit: BoxFit.cover, width: 52, height: 52, errorBuilder: (_, __, ___) => Image.asset('assets/images/ui/picture.webp', width: 34, height: 34, fit: BoxFit.contain))
+            : Image.asset('assets/images/ui/picture.webp', width: 34, height: 34, fit: BoxFit.contain),
       ),
     );
   }

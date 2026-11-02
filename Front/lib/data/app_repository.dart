@@ -29,5 +29,11 @@ abstract class AppRepository {
   Future<DragonEvolutionData> getDragonEvolution();
   Future<List<LearnedWord>> getLearnedWordsAllLanguages();
   Future<List<LiteraryContentItem>> getLiteraryContent(AppLanguage language);
+  Future<LiteraryContentPage> getLiteraryContentPage(
+    AppLanguage language, {
+    LiteraryContentType? type,
+    int page = 1,
+    int pageSize = 20,
+  });
   Future<void> markLiteraryContentListened(int contentId);
 }

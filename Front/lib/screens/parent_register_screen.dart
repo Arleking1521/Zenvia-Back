@@ -76,7 +76,7 @@ class _ParentRegisterScreenState extends State<ParentRegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FantasyBackground(
+      body: _RegistrationCloudBackground(
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(18),
@@ -189,3 +189,37 @@ class _ParentRegisterScreenState extends State<ParentRegisterScreen> {
     );
   }
 }
+
+class _RegistrationCloudBackground extends StatelessWidget {
+  final Widget child;
+
+  const _RegistrationCloudBackground({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const Image(
+          image: AssetImage('assets/images/home_language_bg.webp'),
+          fit: BoxFit.cover,
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.white.withValues(alpha: .10),
+                Colors.white.withValues(alpha: .28),
+                Colors.white.withValues(alpha: .18),
+              ],
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
+}
+

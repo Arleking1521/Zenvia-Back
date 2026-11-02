@@ -34,7 +34,9 @@ class TopicDetailScreen extends StatefulWidget {
 
 class _TopicDetailScreenState extends State<TopicDetailScreen> {
   late Topic _topic;
+  late Future<void> _imagesFuture;
   bool _startingGame = false;
+  bool _routeBusy = false;
   bool _refreshing = false;
   DailyLessonPlan? _dailyLessonPlan;
   bool _loadingDailyLesson = false;
@@ -43,7 +45,14 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
   void initState() {
     super.initState();
     _topic = widget.topic;
+    _imagesFuture = _preloadImages();
     _loadDailyLesson();
+  }
+
+  Future<void> _preloadImages() async {
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await precacheBackendImages(context, <String?>[_topic.iconUrl]);
   }
 
   Future<void> _loadDailyLesson() async {
@@ -67,18 +76,24 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
   }
 
   Future<void> _openDailyLesson() async {
-    await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => DailyWordsLessonScreen(
-          topic: _topic,
-          language: widget.language,
-          repository: widget.appRepository,
+    if (_routeBusy) return;
+    _routeBusy = true;
+    try {
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => DailyWordsLessonScreen(
+            topic: _topic,
+            language: widget.language,
+            repository: widget.appRepository,
+          ),
         ),
-      ),
-    );
-    if (!mounted) return;
-    await _loadDailyLesson();
-    await _refreshTopic();
+      );
+      if (!mounted) return;
+      await _loadDailyLesson();
+      await _refreshTopic();
+    } finally {
+      _routeBusy = false;
+    }
   }
 
   Future<bool> _ensureDailyLessonComplete() async {
@@ -119,15 +134,21 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
   }
 
   Future<void> _openDictionary() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => DictionaryScreen(
-          topic: _topic,
-          language: widget.language,
+    if (_routeBusy) return;
+    _routeBusy = true;
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DictionaryScreen(
+            topic: _topic,
+            language: widget.language,
+          ),
         ),
-      ),
-    );
-    if (mounted) await _refreshTopic();
+      );
+      if (mounted) await _refreshTopic();
+    } finally {
+      _routeBusy = false;
+    }
   }
 
   Future<void> _startGame(GameType gameType) async {
@@ -177,13 +198,25 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _imagesFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(body: ZenviaLoadingScreen());
+        }
+        return _buildReady(context);
+      },
+    );
+  }
+
+  Widget _buildReady(BuildContext context) {
     final total = _topic.totalCount;
     final learned = _topic.learnedCount;
     final progress = _topic.progress.clamp(0.0, 1.0);
     final gamesUnlocked = _dailyLessonPlan?.isComplete == true;
 
     return Scaffold(
-      body: FantasyBackground(
+      body: CloudWorldBackground(
         child: SafeArea(
           child: Stack(
             children: [
@@ -640,7 +673,7 @@ class _DictionaryCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      context.tr('wordsPicturesPronunciation', {'count': topic.totalCount}),
+                      context.tr('wordsPicturesPronunciation', {'count': topic.learnedCount}),
                       style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 9),
@@ -691,62 +724,135 @@ class _GameCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(28),
         child: Ink(
-          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: colors),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: colors,
+            ),
             borderRadius: BorderRadius.circular(28),
             boxShadow: [
-              BoxShadow(color: colors.last.withValues(alpha: .22), blurRadius: 16, offset: const Offset(0, 7)),
+              BoxShadow(
+                color: colors.last.withValues(alpha: .22),
+                blurRadius: 16,
+                offset: const Offset(0, 7),
+              ),
             ],
           ),
-          child: Stack(
-            children: [
-              Opacity(
-                opacity: locked ? .52 : 1,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 64,
-                      height: 64,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: .93), shape: BoxShape.circle),
-                      child: Text(type.emoji, style: const TextStyle(fontSize: 33)),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Все элементы привязаны к одной и той же сетке.
+              // Длина текста больше не может сдвинуть соседние элементы.
+              final h = constraints.maxHeight;
+              final iconTop = h * .16;
+              final titleTop = h * .57;
+              final subtitleTop = h * .77;
+
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned.fill(
+                    child: Opacity(
+                      opacity: locked ? .52 : 1,
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            top: iconTop,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Container(
+                                width: 64,
+                                height: 64,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: .93),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: SizedBox(
+                                  width: 42,
+                                  height: 42,
+                                  child: Center(
+                                    child: Image.asset(
+                                      type.assetPath,
+                                      width: 42,
+                                      height: 42,
+                                      fit: BoxFit.contain,
+                                      alignment: Alignment.center,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: titleTop,
+                            left: 10,
+                            right: 10,
+                            height: 38,
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: Text(
+                                type.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 14,
+                                  height: 1.15,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: subtitleTop,
+                            left: 10,
+                            right: 10,
+                            height: 30,
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: Text(
+                                _description(context, type),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: .92),
+                                  fontSize: 10.5,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 11),
-                    Text(
-                      type.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14, height: 1.15),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      _description(context, type),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white.withValues(alpha: .92), fontSize: 10.5, height: 1.2),
-                    ),
-                  ],
-                ),
-              ),
-              if (locked)
-                Positioned(
-                  right: 6,
-                  top: 6,
-                  child: Container(
-                    width: 34,
-                    height: 34,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.lock_rounded, color: AppColors.deepBlue, size: 19),
                   ),
-                ),
-            ],
+                  if (locked)
+                    const Positioned(
+                      right: 6,
+                      top: 6,
+                      child: SizedBox(
+                        width: 34,
+                        height: 34,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.lock_rounded,
+                            color: AppColors.deepBlue,
+                            size: 19,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -775,12 +881,12 @@ class _TopicImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = topic.iconUrl;
     if (url == null || url.isEmpty) {
-      return Center(child: Text(topic.emoji, style: const TextStyle(fontSize: 100)));
+      return Center(child: Image.asset('assets/images/ui/picture.webp', width: 112, height: 112, fit: BoxFit.contain));
     }
     return Image.network(
       url,
       fit: BoxFit.contain,
-      errorBuilder: (_, __, ___) => Center(child: Text(topic.emoji, style: const TextStyle(fontSize: 100))),
+      errorBuilder: (_, __, ___) => Center(child: Image.asset('assets/images/ui/picture.webp', width: 112, height: 112, fit: BoxFit.contain)),
     );
   }
 }

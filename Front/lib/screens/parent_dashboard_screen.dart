@@ -252,6 +252,12 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
     _reload();
   }
 
+  Future<void> _logout() async {
+    await widget.authRepository.logout();
+    if (!mounted) return;
+    widget.onLoggedOut();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_showLogin) {
@@ -263,11 +269,30 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
     }
 
     return Scaffold(
-      body: FantasyBackground(
-        child: SafeArea(
-          child: FutureBuilder<ParentDashboard>(
-            future: _future,
-            builder: (context, snapshot) {
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/images/home_language_bg.webp',
+            fit: BoxFit.cover,
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.white.withValues(alpha: .18),
+                  Colors.white.withValues(alpha: .42),
+                  const Color(0xFFF3FFF1).withValues(alpha: .62),
+                ],
+              ),
+            ),
+          ),
+          SafeArea(
+            child: FutureBuilder<ParentDashboard>(
+              future: _future,
+              builder: (context, snapshot) {
               if (snapshot.connectionState != ConnectionState.done) {
                 return const Center(
                   child: CircularProgressIndicator(color: AppColors.primary),
@@ -308,16 +333,23 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
                         SizedBox(
                           width: 155,
                           child: Image.asset(
-                            'assets/images/zenvia_kids_logo.png',
+                            'assets/images/zenvia_kids_logo.webp',
                             fit: BoxFit.contain,
                           ),
                         ),
                         const Spacer(),
+                        _DashboardActionButton(
+                          label: context.tr('logout'),
+                          icon: Icons.logout_rounded,
+                          onTap: _logout,
+                        ),
+                        const SizedBox(width: 8),
                         Material(
                           color: Colors.white,
                           shape: const CircleBorder(),
                           child: IconButton(
                             onPressed: _openSettings,
+                            tooltip: context.tr('settings'),
                             icon: const Icon(Icons.settings_rounded, color: AppColors.deepBlue),
                           ),
                         ),
@@ -479,7 +511,49 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
                   ],
                 ),
               );
-            },
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardActionButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _DashboardActionButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: .96),
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: AppColors.deepBlue),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.deepBlue,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
         ),
       ),

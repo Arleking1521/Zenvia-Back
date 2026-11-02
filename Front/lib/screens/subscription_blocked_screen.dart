@@ -98,7 +98,7 @@ class _SubscriptionBlockedScreenState extends State<SubscriptionBlockedScreen> {
         fit: StackFit.expand,
         children: [
           const Image(
-            image: AssetImage('assets/images/subscription_blocked_bg.png'),
+            image: AssetImage('assets/images/subscription_blocked_bg.webp'),
             fit: BoxFit.cover,
           ),
           DecoratedBox(
@@ -162,7 +162,7 @@ class _SubscriptionBlockedScreenState extends State<SubscriptionBlockedScreen> {
                               child: IgnorePointer(
                                 child: Center(
                                   child: Image.asset(
-                                    'assets/images/subscription_blocked_sleep_dragon.png',
+                                    'assets/images/subscription_blocked_sleep_dragon.webp',
                                     height: dragonHeight,
                                     fit: BoxFit.contain,
                                   ),

@@ -32,7 +32,6 @@ import 'screens/smart_content_screen.dart';
 import 'screens/subscription_blocked_screen.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
-import 'widgets/adaptive_app_viewport.dart';
 import 'widgets/parent_pin_dialog.dart';
 import 'widgets/magic_ui.dart';
 
@@ -72,9 +71,6 @@ class KidsLangApp extends StatelessWidget {
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
-        builder: (context, child) => AdaptiveAppViewport(
-          child: child ?? const SizedBox.shrink(),
-        ),
         home: const _AuthGate(),
       ),
     );
@@ -219,7 +215,7 @@ class _AuthGateState extends State<_AuthGate> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Image.asset(
-                      'assets/images/zenvia_kids_logo.png',
+                      'assets/images/zenvia_kids_logo.webp',
                       width: 270,
                       fit: BoxFit.contain,
                     ),

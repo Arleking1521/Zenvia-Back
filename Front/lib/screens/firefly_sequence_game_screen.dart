@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../widgets/magic_ui.dart';
+
 class FireflySequenceGameScreen extends StatefulWidget {
   const FireflySequenceGameScreen({super.key});
 
@@ -13,7 +15,7 @@ class FireflySequenceGameScreen extends StatefulWidget {
 class _FireflySequenceGameScreenState
     extends State<FireflySequenceGameScreen> {
   static const int _maxRounds = 6;
-  static const String _fireflyAsset = 'assets/images/games/firefly/firefly.png';
+  static const String _fireflyAsset = 'assets/images/games/firefly/firefly.webp';
 
   final math.Random _random = math.Random();
 
@@ -174,7 +176,7 @@ class _FireflySequenceGameScreenState
 
     setState(() {
       _waitingForPlayer = false;
-      _message = 'Правильно! ✨';
+      _message = 'Правильно!';
     });
 
     if (_round >= _maxRounds) {
@@ -415,13 +417,21 @@ class _FireflySequenceGameScreenState
                 ],
               ),
               const SizedBox(height: 8),
-              Text(
-                _message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Color(0xFF174F86),
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
+              SizedBox(
+                height: 42,
+                child: Center(
+                  child: Text(
+                    _message,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF174F86),
+                      fontSize: 17,
+                      height: 1.08,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -522,9 +532,9 @@ class _FireflySequenceGameScreenState
         const SizedBox(height: 8),
         Text(
           _showingSequence
-              ? 'Сейчас только смотри 👀'
+              ? 'Сейчас только смотри'
               : _waitingForPlayer
-                  ? 'Нажимай на светлячков по порядку 👆'
+                  ? 'Нажимай на светлячков по порядку'
                   : 'Готов? Светлячки покажут последовательность',
           textAlign: TextAlign.center,
           style: TextStyle(
@@ -853,7 +863,7 @@ class _FireflyDifficultyPreview extends StatelessWidget {
             width: size,
             height: size,
             child: Image.asset(
-              'assets/images/games/firefly/firefly.png',
+              'assets/images/games/firefly/firefly.webp',
               fit: BoxFit.contain,
             ),
           ),
@@ -960,7 +970,7 @@ class _CircleHeaderButton extends StatelessWidget {
       shape: const CircleBorder(),
       child: IconButton(
         tooltip: tooltip,
-        onPressed: onPressed,
+        onPressed: () => DebouncedTapGuard.run('firefly-header:$tooltip', onPressed),
         icon: Icon(
           icon,
           color: Colors.white,

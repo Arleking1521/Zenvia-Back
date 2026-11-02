@@ -74,6 +74,7 @@ class _ParentPinVerifyDialogState extends State<_ParentPinVerifyDialog> {
 
   String? _error;
   bool _loading = false;
+  bool _obscurePin = true;
 
   @override
   void dispose() {
@@ -133,7 +134,7 @@ class _ParentPinVerifyDialogState extends State<_ParentPinVerifyDialog> {
           TextField(
             controller: _pinController,
             autofocus: true,
-            obscureText: true,
+            obscureText: _obscurePin,
             enableSuggestions: false,
             autocorrect: false,
             keyboardType: TextInputType.number,
@@ -143,10 +144,18 @@ class _ParentPinVerifyDialogState extends State<_ParentPinVerifyDialog> {
               FilteringTextInputFormatter.digitsOnly,
               LengthLimitingTextInputFormatter(4),
             ],
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'PIN',
               hintText: '••••',
               counterText: '',
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _obscurePin = !_obscurePin),
+                icon: Icon(
+                  _obscurePin
+                      ? Icons.visibility_off_rounded
+                      : Icons.visibility_rounded,
+                ),
+              ),
             ),
             onSubmitted: (_) => _submit(),
           ),
@@ -199,6 +208,9 @@ class _ParentPinSetupDialogState extends State<_ParentPinSetupDialog> {
 
   String? _error;
   bool _loading = false;
+  bool _obscurePassword = true;
+  bool _obscurePin = true;
+  bool _obscureConfirm = true;
 
   @override
   void dispose() {
@@ -269,17 +281,40 @@ class _ParentPinSetupDialogState extends State<_ParentPinSetupDialog> {
             const SizedBox(height: 14),
             TextField(
               controller: _passwordController,
-              obscureText: true,
+              obscureText: _obscurePassword,
+              enableSuggestions: false,
+              autocorrect: false,
               decoration: InputDecoration(
                 labelText: context.tr('parentPassword'),
+                suffixIcon: IconButton(
+                  onPressed: () => setState(
+                    () => _obscurePassword = !_obscurePassword,
+                  ),
+                  icon: Icon(
+                    _obscurePassword
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 10),
-            _PinField(controller: _pinController, label: context.tr('newPin')),
+            _PinField(
+              controller: _pinController,
+              label: context.tr('newPin'),
+              obscureText: _obscurePin,
+              onToggleVisibility: () => setState(
+                () => _obscurePin = !_obscurePin,
+              ),
+            ),
             const SizedBox(height: 10),
             _PinField(
               controller: _confirmController,
               label: context.tr('repeatPin'),
+              obscureText: _obscureConfirm,
+              onToggleVisibility: () => setState(
+                () => _obscureConfirm = !_obscureConfirm,
+              ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
@@ -314,14 +349,21 @@ class _ParentPinSetupDialogState extends State<_ParentPinSetupDialog> {
 class _PinField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
+  final bool obscureText;
+  final VoidCallback onToggleVisibility;
 
-  const _PinField({required this.controller, required this.label});
+  const _PinField({
+    required this.controller,
+    required this.label,
+    required this.obscureText,
+    required this.onToggleVisibility,
+  });
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
-      obscureText: true,
+      obscureText: obscureText,
       enableSuggestions: false,
       autocorrect: false,
       keyboardType: TextInputType.number,
@@ -335,6 +377,14 @@ class _PinField extends StatelessWidget {
         labelText: label,
         hintText: '••••',
         counterText: '',
+        suffixIcon: IconButton(
+          onPressed: onToggleVisibility,
+          icon: Icon(
+            obscureText
+                ? Icons.visibility_off_rounded
+                : Icons.visibility_rounded,
+          ),
+        ),
       ),
     );
   }

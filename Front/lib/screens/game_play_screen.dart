@@ -312,8 +312,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FantasyBackground(
-        light: false,
+      body: _LearningCloudBackground(
         child: SafeArea(
           child: Column(
             children: [
@@ -336,7 +335,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 21),
                       ),
                     ),
-                    const Text('🎮', style: TextStyle(fontSize: 26)),
+                    const SizedBox(width: 48),
                   ],
                 ),
               ),
@@ -883,15 +882,18 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     if (result != null) ...[
-                                      Icon(
-                                        result.correct
-                                            ? Icons.check_circle_rounded
-                                            : Icons.cancel_rounded,
-                                        size: 16,
-                                        color: result.correct
-                                            ? AppColors.primary
-                                            : AppColors.danger,
-                                      ),
+                                      result.correct
+                                          ? Image.asset(
+                                              'assets/images/correct_star.webp',
+                                              width: 16,
+                                              height: 16,
+                                              fit: BoxFit.contain,
+                                            )
+                                          : const Icon(
+                                              Icons.cancel_rounded,
+                                              size: 16,
+                                              color: AppColors.danger,
+                                            ),
                                       const SizedBox(width: 4),
                                     ],
                                     Flexible(
@@ -955,7 +957,12 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                       color: Colors.white,
                     ),
                   )
-                : const Icon(Icons.check_rounded),
+                : Image.asset(
+                    'assets/images/correct_star.webp',
+                    width: 18,
+                    height: 18,
+                    fit: BoxFit.contain,
+                  ),
             label: Text(
               _matchingPairs.length == question.left.length
                   ? context.tr('check')
@@ -1139,10 +1146,17 @@ class _FeedbackBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text(
-            fullyCorrect ? '✅' : '💪',
-            style: const TextStyle(fontSize: 24),
-          ),
+          fullyCorrect
+              ? Image.asset(
+                  'assets/images/correct_star.webp',
+                  width: 24,
+                  height: 24,
+                  fit: BoxFit.contain,
+                )
+              : const Text(
+                  '💪',
+                  style: TextStyle(fontSize: 24),
+                ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1191,4 +1205,38 @@ class _OptionVisual {
   final Color border;
 
   const _OptionVisual(this.background, this.border);
+}
+
+class _LearningCloudBackground extends StatelessWidget {
+  final Widget child;
+
+  const _LearningCloudBackground({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const Image(
+          image: AssetImage('assets/images/world_map_sky.webp'),
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.white.withValues(alpha: .04),
+                Colors.transparent,
+                Colors.white.withValues(alpha: .03),
+              ],
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
 }

@@ -3,6 +3,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../widgets/magic_ui.dart';
+
 import '../l10n/app_strings.dart';
 
 class CatchStarsGameScreen extends StatefulWidget {
@@ -14,9 +16,9 @@ class CatchStarsGameScreen extends StatefulWidget {
 
 class _CatchStarsGameScreenState extends State<CatchStarsGameScreen> {
   static const int _gameSeconds = 30;
-  static const String _starAsset = 'assets/images/star_cute.png';
-  static const String _cloudAsset = 'assets/images/cloud_cute.png';
-  static const String _eggAsset = 'assets/images/dragon_egg_cute.png';
+  static const String _starAsset = 'assets/images/games/catch_stars/star.webp';
+  static const String _cloudAsset = 'assets/images/games/catch_stars/cloud.webp';
+  static const String _eggAsset = 'assets/images/games/catch_stars/dragon_egg.webp';
 
   final math.Random _random = math.Random();
 
@@ -546,13 +548,21 @@ class _InfoPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 7),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Color(0xFF174F86),
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
+          SizedBox(
+            height: 40,
+            child: Center(
+              child: Text(
+                message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF174F86),
+                  fontSize: 16,
+                  height: 1.08,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
             ),
           ),
         ],
@@ -620,7 +630,7 @@ class _CircleButton extends StatelessWidget {
       shape: const CircleBorder(),
       child: IconButton(
         tooltip: tooltip,
-        onPressed: onPressed,
+        onPressed: () => DebouncedTapGuard.run('catch-header:$tooltip', onPressed),
         icon: Icon(
           icon,
           color: Colors.white,

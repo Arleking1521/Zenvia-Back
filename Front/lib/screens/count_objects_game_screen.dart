@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../widgets/magic_ui.dart';
+
 class CountObjectsGameScreen extends StatefulWidget {
   const CountObjectsGameScreen({super.key});
 
@@ -120,7 +122,7 @@ class _CountObjectsGameScreenState extends State<CountObjectsGameScreen> {
       _locked = true;
       _dropHover = false;
       _wrongDrop = false;
-      _message = 'Правильно! 🎉';
+      _message = 'Правильно!';
     });
 
     await Future<void>.delayed(const Duration(milliseconds: 720));
@@ -153,7 +155,12 @@ class _CountObjectsGameScreenState extends State<CountObjectsGameScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('🍕', style: TextStyle(fontSize: 62)),
+              Image.asset(
+                'assets/images/games/pizza/pizza_base.webp',
+                width: 84,
+                height: 84,
+                fit: BoxFit.contain,
+              ),
               const SizedBox(height: 6),
               const Text(
                 'Все пиццы посчитаны!',
@@ -313,18 +320,26 @@ class _CountObjectsGameScreenState extends State<CountObjectsGameScreen> {
                 ],
               ),
               const SizedBox(height: 9),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                child: Text(
-                  _message,
-                  key: ValueKey(_message),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _wrongDrop
-                        ? const Color(0xFFD14D49)
-                        : const Color(0xFF174F86),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
+              SizedBox(
+                height: 48,
+                child: Center(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: Text(
+                      _message,
+                      key: ValueKey(_message),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _wrongDrop
+                            ? const Color(0xFFD14D49)
+                            : const Color(0xFF174F86),
+                        fontSize: 18,
+                        height: 1.08,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -360,7 +375,9 @@ class _CountObjectsGameScreenState extends State<CountObjectsGameScreen> {
                             setState(() => _dropHover = false);
                           }
                         },
-                        onAccept: _handleDrop,
+                        onAcceptWithDetails: (details) {
+                          _handleDrop(details.data);
+                        },
                         builder: (context, candidateData, rejectedData) {
                           return AnimatedScale(
                             duration: const Duration(milliseconds: 150),
@@ -386,12 +403,10 @@ class _CountObjectsGameScreenState extends State<CountObjectsGameScreen> {
                               child: SizedBox(
                                 width: pizzaSize,
                                 height: pizzaSize,
-                                child: CustomPaint(
-                                  painter: _PizzaPainter(
-                                    count: _answer,
-                                    topping: _topping,
-                                    seed: _pizzaSeed,
-                                  ),
+                                child: _PizzaBoard(
+                                  count: _answer,
+                                  topping: _topping,
+                                  seed: _pizzaSeed,
                                 ),
                               ),
                             ),
@@ -720,197 +735,76 @@ class _CircleHeaderButton extends StatelessWidget {
       shape: const CircleBorder(),
       child: IconButton(
         tooltip: tooltip,
-        onPressed: onPressed,
+        onPressed: () => DebouncedTapGuard.run('count-header:$tooltip', onPressed),
         icon: Icon(icon, color: Colors.white),
       ),
     );
   }
 }
 
-class _PizzaPainter extends CustomPainter {
+class _PizzaBoard extends StatelessWidget {
   final int count;
   final _PizzaTopping topping;
   final int seed;
 
-  const _PizzaPainter({
+  const _PizzaBoard({
     required this.count,
     required this.topping,
     required this.seed,
   });
 
-  static const List<Offset> _positions = [
-    Offset(.50, .18),
-    Offset(.31, .23),
-    Offset(.69, .24),
-    Offset(.20, .36),
-    Offset(.43, .34),
-    Offset(.61, .36),
-    Offset(.80, .37),
-    Offset(.29, .48),
-    Offset(.52, .48),
-    Offset(.72, .50),
-    Offset(.18, .59),
-    Offset(.40, .60),
-    Offset(.61, .62),
-    Offset(.81, .60),
-    Offset(.28, .72),
-    Offset(.49, .73),
-    Offset(.70, .72),
-    Offset(.39, .82),
-    Offset(.61, .82),
-    Offset(.50, .57),
+  static const List<Offset> _positions = <Offset>[
+    Offset(.50, .18), Offset(.31, .23), Offset(.69, .24), Offset(.20, .36),
+    Offset(.43, .34), Offset(.61, .36), Offset(.80, .37), Offset(.29, .48),
+    Offset(.52, .48), Offset(.72, .50), Offset(.18, .59), Offset(.40, .60),
+    Offset(.61, .62), Offset(.81, .60), Offset(.28, .72), Offset(.49, .73),
+    Offset(.70, .72), Offset(.39, .82), Offset(.61, .82), Offset(.50, .57),
   ];
 
+  String get _toppingAsset => switch (topping) {
+        _PizzaTopping.pepperoni => 'assets/images/games/pizza/pepperoni.webp',
+        _PizzaTopping.mushroom => 'assets/images/games/pizza/mushroom.webp',
+        _PizzaTopping.olive => 'assets/images/games/pizza/olive.webp',
+      };
+
   @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.shortestSide / 2;
-
-    canvas.drawCircle(
-      center + Offset(0, radius * .05),
-      radius * .91,
-      Paint()..color = const Color(0x33000000),
-    );
-
-    canvas.drawCircle(
-      center,
-      radius * .92,
-      Paint()..color = const Color(0xFFCC7A35),
-    );
-    canvas.drawCircle(
-      center,
-      radius * .82,
-      Paint()..color = const Color(0xFFF6AE4A),
-    );
-    canvas.drawCircle(
-      center,
-      radius * .74,
-      Paint()..color = const Color(0xFFFFDF72),
-    );
-
-    final sauce = Paint()
-      ..color = const Color(0xFFD95D43).withValues(alpha: .18);
-    canvas.drawCircle(center, radius * .70, sauce);
-
-    final slicePaint = Paint()
-      ..color = const Color(0x55D69A40)
-      ..strokeWidth = math.max(1.2, radius * .012);
-
-    for (var i = 0; i < 6; i++) {
-      final angle = i * math.pi / 3;
-      canvas.drawLine(
-        center,
-        center + Offset(math.cos(angle), math.sin(angle)) * radius * .70,
-        slicePaint,
-      );
-    }
-
-    final toppingRadius = count <= 5
-        ? radius * .085
-        : count <= 10
-            ? radius * .065
-            : radius * .047;
-
-    final step = 7;
+  Widget build(BuildContext context) {
     final start = seed % _positions.length;
-
-    for (var i = 0; i < count; i++) {
-      final p = _positions[(start + i * step) % _positions.length];
-      final position = Offset(size.width * p.dx, size.height * p.dy);
-      _drawTopping(canvas, position, toppingRadius, topping);
-    }
-
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius * .86),
-      math.pi * 1.05,
-      math.pi * .45,
-      false,
-      Paint()
-        ..color = Colors.white.withValues(alpha: .18)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = radius * .035
-        ..strokeCap = StrokeCap.round,
-    );
-  }
-
-  void _drawTopping(
-    Canvas canvas,
-    Offset center,
-    double r,
-    _PizzaTopping topping,
-  ) {
-    switch (topping) {
-      case _PizzaTopping.pepperoni:
-        canvas.drawCircle(
-          center,
-          r,
-          Paint()..color = const Color(0xFFD84A3B),
-        );
-        canvas.drawCircle(
-          center + Offset(-r * .25, -r * .12),
-          r * .16,
-          Paint()..color = const Color(0xFF9F302A),
-        );
-        canvas.drawCircle(
-          center + Offset(r * .30, r * .22),
-          r * .12,
-          Paint()..color = const Color(0xFF9F302A),
-        );
-        break;
-
-      case _PizzaTopping.mushroom:
-        final cap = Rect.fromCenter(
-          center: center - Offset(0, r * .18),
-          width: r * 2,
-          height: r * 1.25,
-        );
-        canvas.drawOval(
-          cap,
-          Paint()..color = const Color(0xFFF2E2C7),
-        );
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromCenter(
-              center: center + Offset(0, r * .52),
-              width: r * .66,
-              height: r * 1.05,
+    const step = 7;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = math.min(constraints.maxWidth, constraints.maxHeight);
+        final toppingSize = count <= 5
+            ? size * .145
+            : count <= 10
+                ? size * .112
+                : size * .084;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: Image.asset(
+                'assets/images/games/pizza/pizza_base.webp',
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+              ),
             ),
-            Radius.circular(r * .25),
-          ),
-          Paint()..color = const Color(0xFFD7BE98),
+            for (var i = 0; i < count; i++)
+              Positioned(
+                left: size * _positions[(start + i * step) % _positions.length].dx - toppingSize / 2,
+                top: size * _positions[(start + i * step) % _positions.length].dy - toppingSize / 2,
+                width: toppingSize,
+                height: toppingSize,
+                child: Image.asset(
+                  _toppingAsset,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                ),
+              ),
+          ],
         );
-        canvas.drawArc(
-          cap,
-          0,
-          math.pi,
-          false,
-          Paint()
-            ..color = const Color(0xFFBE9C73)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = math.max(1, r * .14),
-        );
-        break;
-
-      case _PizzaTopping.olive:
-        canvas.drawCircle(
-          center,
-          r,
-          Paint()..color = const Color(0xFF334335),
-        );
-        canvas.drawCircle(
-          center,
-          r * .48,
-          Paint()..color = const Color(0xFFFFDF72),
-        );
-        break;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _PizzaPainter oldDelegate) {
-    return oldDelegate.count != count ||
-        oldDelegate.topping != topping ||
-        oldDelegate.seed != seed;
+      },
+    );
   }
 }
 

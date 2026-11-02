@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/magic_ui.dart';
+
 import 'catch_stars_game_screen.dart';
 import 'count_objects_game_screen.dart';
 import 'connect_dots_game_screen.dart';
@@ -10,10 +12,10 @@ import 'puzzle_game_screen.dart';
 class PlayCaveScreen extends StatelessWidget {
   const PlayCaveScreen({super.key});
 
-  static const String _fireflyAsset = 'assets/images/games/firefly/firefly.png';
-  static const String _starAsset = 'assets/images/games/catch_stars/star.png';
-  static const String _cloudAsset = 'assets/images/games/catch_stars/cloud.png';
-  static const String _eggAsset = 'assets/images/games/catch_stars/dragon_egg.png';
+  static const String _fireflyAsset = 'assets/images/games/firefly/firefly.webp';
+  static const String _starAsset = 'assets/images/games/catch_stars/star.webp';
+  static const String _cloudAsset = 'assets/images/games/catch_stars/cloud.webp';
+  static const String _eggAsset = 'assets/images/games/catch_stars/dragon_egg.webp';
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +60,6 @@ class PlayCaveScreen extends StatelessWidget {
                         ),
                       ),
                       const Spacer(),
-                      const Text('🎮', style: TextStyle(fontSize: 30)),
                     ],
                   ),
                 ),
@@ -245,7 +246,7 @@ class _GameTileState extends State<_GameTile> {
       onTapCancel: () => setState(() => _pressed = false),
       onTapUp: (_) {
         setState(() => _pressed = false);
-        widget.onTap();
+        DebouncedTapGuard.run('play-cave-${widget.title}', widget.onTap);
       },
       child: AnimatedScale(
         duration: const Duration(milliseconds: 110),
@@ -342,7 +343,10 @@ class _MiniMemoryPreview extends StatelessWidget {
             ),
           ],
         ),
-        child: Text(value, style: const TextStyle(fontSize: 38)),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Image.asset(value, fit: BoxFit.contain),
+        ),
       );
     }
 
@@ -355,14 +359,14 @@ class _MiniMemoryPreview extends StatelessWidget {
             angle: -.12,
             child: Transform.translate(
               offset: const Offset(-42, 4),
-              child: card('🐼', const Color(0xFFFFE9A8)),
+              child: card('assets/images/correct_star.webp', const Color(0xFFFFE9A8)),
             ),
           ),
           Transform.rotate(
             angle: .12,
             child: Transform.translate(
               offset: const Offset(42, 4),
-              child: card('🐼', const Color(0xFFFFE9A8)),
+              child: card('assets/images/correct_star.webp', const Color(0xFFFFE9A8)),
             ),
           ),
           Transform.translate(
@@ -550,7 +554,7 @@ class _MiniPuzzlePreview extends StatelessWidget {
               ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: Image.asset(
-                  'assets/images/dragon_hero.webp',
+                  'assets/images/world_island_1.webp',
                   width: 146,
                   height: 92,
                   fit: BoxFit.cover,
@@ -583,10 +587,12 @@ class _MiniPuzzlePreview extends StatelessWidget {
                         ),
                       ],
                     ),
-                    child: const Icon(
-                      Icons.extension_rounded,
-                      color: Colors.white,
-                      size: 27,
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Image.asset(
+                        'assets/images/ui/puzzle.webp',
+                        fit: BoxFit.contain,
+                      ),
                     ),
                   ),
                 ),
@@ -650,17 +656,27 @@ class _MiniCountObjectsPreview extends StatelessWidget {
               child: SizedBox(
                 width: 90,
                 height: 90,
-                child: CustomPaint(
-                  painter: _MiniPizzaPainter(),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: Image.asset(
+                        'assets/images/games/pizza/pizza_base.webp',
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    Positioned(left: 18, top: 18, width: 22, height: 22, child: Image.asset('assets/images/games/pizza/pepperoni.webp')),
+                    Positioned(right: 18, top: 29, width: 22, height: 22, child: Image.asset('assets/images/games/pizza/pepperoni.webp')),
+                    Positioned(left: 34, bottom: 17, width: 22, height: 22, child: Image.asset('assets/images/games/pizza/pepperoni.webp')),
+                  ],
                 ),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          Column(
+          const Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text(
+              Text(
                 'Сколько?',
                 style: TextStyle(
                   color: Color(0xFF8A4F2A),
@@ -668,18 +684,18 @@ class _MiniCountObjectsPreview extends StatelessWidget {
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              const SizedBox(height: 7),
+              SizedBox(height: 7),
               Row(
                 children: [
-                  _MiniNumberChip(value: '3'),
-                  const SizedBox(width: 5),
-                  _MiniNumberChip(value: '5', highlighted: true),
-                  const SizedBox(width: 5),
-                  _MiniNumberChip(value: '7'),
+                  const _MiniNumberChip(value: '3'),
+                  SizedBox(width: 5),
+                  const _MiniNumberChip(value: '5', highlighted: true),
+                  SizedBox(width: 5),
+                  const _MiniNumberChip(value: '7'),
                 ],
               ),
-              const SizedBox(height: 5),
-              const Icon(
+              SizedBox(height: 5),
+              Icon(
                 Icons.touch_app_rounded,
                 color: Color(0xFFE76F51),
                 size: 20,
@@ -735,61 +751,6 @@ class _MiniNumberChip extends StatelessWidget {
     );
   }
 }
-
-class _MiniPizzaPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.shortestSide / 2;
-
-    canvas.drawCircle(
-      center + const Offset(0, 3),
-      radius * .92,
-      Paint()..color = const Color(0x22000000),
-    );
-    canvas.drawCircle(
-      center,
-      radius * .92,
-      Paint()..color = const Color(0xFFD88B3D),
-    );
-    canvas.drawCircle(
-      center,
-      radius * .78,
-      Paint()..color = const Color(0xFFFFD56A),
-    );
-    canvas.drawCircle(
-      center,
-      radius * .69,
-      Paint()..color = const Color(0xFFFFE28A),
-    );
-
-    const pepperoni = [
-      Offset(.33, .31),
-      Offset(.61, .28),
-      Offset(.49, .51),
-      Offset(.28, .63),
-      Offset(.68, .66),
-    ];
-
-    for (final p in pepperoni) {
-      final c = Offset(size.width * p.dx, size.height * p.dy);
-      canvas.drawCircle(
-        c,
-        radius * .105,
-        Paint()..color = const Color(0xFFD94A3A),
-      );
-      canvas.drawCircle(
-        c + Offset(radius * .025, -radius * .02),
-        radius * .025,
-        Paint()..color = const Color(0xFF9D2F2B),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
 
 class _MiniConnectDotsPreview extends StatelessWidget {
   const _MiniConnectDotsPreview();

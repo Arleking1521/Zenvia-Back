@@ -5,6 +5,7 @@ import '../models/child_profile.dart';
 import '../l10n/app_strings.dart';
 import '../services/audio_settings_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/magic_ui.dart';
 import 'child_editor_screen.dart';
 
 class ChildSettingsScreen extends StatefulWidget {
@@ -32,8 +33,19 @@ class _ChildSettingsScreenState extends State<ChildSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _future = widget.repository.getChild(widget.childId);
+    _future = _loadChild();
     _loadAudioSettings();
+  }
+
+  Future<ChildProfile> _loadChild() async {
+    final child = await widget.repository.getChild(widget.childId);
+    if (mounted) {
+      await precacheBackendImages(
+        context,
+        <String?>[child.avatar?.imageUrl, child.baseLanguage?.iconUrl],
+      );
+    }
+    return child;
   }
 
   Future<void> _loadAudioSettings() async {
@@ -71,7 +83,7 @@ class _ChildSettingsScreenState extends State<ChildSettingsScreen> {
     );
     if (updated != null && mounted) {
       setState(() {
-        _future = widget.repository.getChild(widget.childId);
+        _future = _loadChild();
       });
     }
   }
@@ -84,20 +96,24 @@ class _ChildSettingsScreenState extends State<ChildSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(title: Text(context.tr('childProfile'))),
-      body: FutureBuilder<ChildProfile>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text(snapshot.error.toString()));
-          }
-          final child = snapshot.data!;
-          return ListView(
+    return FutureBuilder<ChildProfile>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(body: ZenviaLoadingScreen());
+        }
+        if (snapshot.hasError) {
+          return Scaffold(
+            backgroundColor: AppColors.background,
+            appBar: AppBar(title: Text(context.tr('childProfile'))),
+            body: Center(child: Text(snapshot.error.toString())),
+          );
+        }
+        final child = snapshot.data!;
+        return Scaffold(
+          backgroundColor: AppColors.background,
+          appBar: AppBar(title: Text(context.tr('childProfile'))),
+          body: ListView(
             padding: const EdgeInsets.all(20),
             children: [
               Center(
@@ -108,7 +124,7 @@ class _ChildSettingsScreenState extends State<ChildSettingsScreen> {
                       ? null
                       : NetworkImage(child.avatar!.imageUrl!),
                   child: child.avatar?.imageUrl == null
-                      ? const Text('🙂', style: TextStyle(fontSize: 40))
+                      ? Image.asset('assets/images/dragon_hero.webp', width: 54, height: 54, fit: BoxFit.contain)
                       : null,
                 ),
               ),
@@ -189,9 +205,9 @@ class _ChildSettingsScreenState extends State<ChildSettingsScreen> {
                 style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
               ),
             ],
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }

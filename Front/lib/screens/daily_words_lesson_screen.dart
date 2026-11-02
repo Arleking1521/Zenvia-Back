@@ -14,6 +14,7 @@ import '../models/topic.dart';
 import '../services/audio_settings_service.dart';
 import '../services/background_music_service.dart';
 import '../services/daily_lesson_service.dart';
+import '../widgets/magic_ui.dart';
 
 class DailyWordsLessonScreen extends StatefulWidget {
   final Topic topic;
@@ -42,6 +43,7 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
     ),
   );
   final Map<String, Uint8List> _audioCache = <String, Uint8List>{};
+  final Map<String, int> _listenCounts = <String, int>{};
   final Object _musicSilenceToken = Object();
 
   DailyLessonPlan? _plan;
@@ -50,7 +52,10 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
   bool _loading = true;
   bool _audioLoading = false;
   bool _playing = false;
+  bool _nextBusy = false;
+  bool _reviewMode = false;
   String? _currentAudioUrl;
+  String? _reviewLoadingAudioUrl;
   StreamSubscription<PlayerState>? _stateSubscription;
   StreamSubscription<void>? _completeSubscription;
 
@@ -69,6 +74,7 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
         _playing = false;
         _audioLoading = false;
         _currentAudioUrl = null;
+        _reviewLoadingAudioUrl = null;
       });
     });
     _load();
@@ -84,6 +90,7 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
   }
 
   Future<void> _load() async {
+    if (mounted) setState(() => _loading = true);
     try {
       final results = await Future.wait<dynamic>([
         _lessonService.loadPlan(topic: widget.topic, language: widget.language),
@@ -91,12 +98,21 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
       ]);
       if (!mounted) return;
       final plan = results[0] as DailyLessonPlan;
+      await precacheBackendImages(
+        context,
+        <String?>[
+          results[1] as String?,
+          ...plan.words.map((word) => word.imageUrl),
+        ],
+      );
+      if (!mounted) return;
       var index = plan.words.indexWhere((word) => !plan.isWordStudied(word));
       if (index < 0) index = math.max(0, plan.words.length - 1);
       setState(() {
         _plan = plan;
         _dragonUrl = results[1] as String?;
         _index = index;
+        _reviewMode = plan.isComplete && plan.words.isNotEmpty;
         _loading = false;
       });
     } catch (e) {
@@ -148,6 +164,13 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
     try {
       if (_playing && _currentAudioUrl == audioUrl) {
         await _audioPlayer.stop();
+        if (!mounted) return;
+        setState(() {
+          _playing = false;
+          _audioLoading = false;
+          _currentAudioUrl = null;
+        });
+        return;
       }
       if (mounted) setState(() => _audioLoading = true);
       await _audioPlayer.stop();
@@ -161,10 +184,13 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
                   ? 'audio/mp4'
                   : 'audio/mpeg';
       await AudioSettingsService.instance.load();
+      final listenNumber = (_listenCounts[audioUrl] ?? 0) + 1;
+      _listenCounts[audioUrl] = listenNumber;
       await _audioPlayer.play(
         BytesSource(bytes, mimeType: mimeType),
         volume: AudioSettingsService.instance.voiceVolume,
       );
+      await _audioPlayer.setPlaybackRate(listenNumber.isEven ? 0.72 : 1.0);
 
       // Only now tell Django that the word was listened to. If audio loading
       // or playback fails, the word stays unfinished and games remain locked.
@@ -195,51 +221,324 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
     }
   }
 
-  Future<void> _next() async {
-    final plan = _plan;
-    if (plan == null || plan.words.isEmpty) {
-      Navigator.of(context).pop(true);
+  Future<void> _playReviewWord(WordItem word) async {
+    final audioUrl = word.audioFor(widget.language)?.trim();
+    if (audioUrl == null || audioUrl.isEmpty || _audioLoading) {
+      if (audioUrl == null || audioUrl.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.tr('audioNotAdded')),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
       return;
     }
 
-    final current = plan.words[_index];
-    if (!plan.isWordStudied(current)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.tr('listenFirst')),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
+    try {
+      if (_playing && _currentAudioUrl == audioUrl) {
+        await _audioPlayer.stop();
+        if (!mounted) return;
+        setState(() {
+          _playing = false;
+          _audioLoading = false;
+          _currentAudioUrl = null;
+          _reviewLoadingAudioUrl = null;
+        });
+        return;
+      }
 
-    await _audioPlayer.stop();
-    if (_index < plan.words.length - 1) {
       setState(() {
-        _index++;
-        _playing = false;
-        _audioLoading = false;
-        _currentAudioUrl = null;
+        _audioLoading = true;
+        _reviewLoadingAudioUrl = audioUrl;
       });
-      return;
-    }
+      await _audioPlayer.stop();
+      final bytes = await _loadAudio(audioUrl);
+      final lower = audioUrl.toLowerCase();
+      final mimeType = lower.endsWith('.wav')
+          ? 'audio/wav'
+          : lower.endsWith('.ogg')
+              ? 'audio/ogg'
+              : lower.endsWith('.m4a')
+                  ? 'audio/mp4'
+                  : 'audio/mpeg';
 
-    final latest = await _lessonService.loadPlan(
-      topic: widget.topic,
-      language: widget.language,
-    );
-    if (!mounted) return;
-    if (latest.isComplete) {
-      Navigator.of(context).pop(true);
+      await AudioSettingsService.instance.load();
+      final listenNumber = (_listenCounts[audioUrl] ?? 0) + 1;
+      _listenCounts[audioUrl] = listenNumber;
+      await _audioPlayer.play(
+        BytesSource(bytes, mimeType: mimeType),
+        volume: AudioSettingsService.instance.voiceVolume,
+      );
+      await _audioPlayer.setPlaybackRate(listenNumber.isEven ? 0.72 : 1.0);
+
+      if (!mounted) return;
+      setState(() {
+        _currentAudioUrl = audioUrl;
+        _audioLoading = false;
+        _reviewLoadingAudioUrl = null;
+      });
+    } catch (_) {
+      await _audioPlayer.stop();
+      if (!mounted) return;
+      setState(() {
+        _audioLoading = false;
+        _playing = false;
+        _currentAudioUrl = null;
+        _reviewLoadingAudioUrl = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.tr('audioPlayFailed'))),
+      );
     }
+  }
+
+  Future<void> _next() async {
+    if (_nextBusy) return;
+    _nextBusy = true;
+    try {
+      final plan = _plan;
+      if (plan == null || plan.words.isEmpty) {
+        if (mounted) Navigator.of(context).pop(true);
+        return;
+      }
+
+      final current = plan.words[_index];
+      if (!plan.isWordStudied(current)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(context.tr('listenFirst')),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+
+      await _audioPlayer.stop();
+      if (_index < plan.words.length - 1) {
+        if (!mounted) return;
+        setState(() {
+          _index++;
+          _playing = false;
+          _audioLoading = false;
+          _currentAudioUrl = null;
+        });
+        return;
+      }
+
+      final latest = await _lessonService.loadPlan(
+        topic: widget.topic,
+        language: widget.language,
+      );
+      if (!mounted) return;
+      if (latest.isComplete) {
+        setState(() {
+          _plan = latest;
+          _reviewMode = true;
+          _index = math.max(0, latest.words.length - 1);
+          _playing = false;
+          _audioLoading = false;
+          _currentAudioUrl = null;
+          _reviewLoadingAudioUrl = null;
+        });
+      }
+    } finally {
+      _nextBusy = false;
+    }
+  }
+
+  Widget _buildReviewScreen(DailyLessonPlan plan) {
+    return Scaffold(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/images/daily_words_bg.webp',
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  const Color(0xFF138EDC).withValues(alpha: .08),
+                  Colors.white.withValues(alpha: .04),
+                  Colors.white.withValues(alpha: .13),
+                ],
+              ),
+            ),
+          ),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final height = constraints.maxHeight;
+                final uiScale = math.min(width / 390, height / 820)
+                    .clamp(.86, 1.18)
+                    .toDouble();
+
+                return Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    14 * uiScale,
+                    8 * uiScale,
+                    14 * uiScale,
+                    12 * uiScale,
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.fromLTRB(
+                          10 * uiScale,
+                          10 * uiScale,
+                          14 * uiScale,
+                          12 * uiScale,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF12A8EA), Color(0xFF0879CA)],
+                          ),
+                          borderRadius: BorderRadius.circular(28 * uiScale),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: .35),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF075CA5)
+                                  .withValues(alpha: .24),
+                              blurRadius: 18,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            _RoundHeaderButton(
+                              icon: Icons.arrow_back_rounded,
+                              uiScale: uiScale,
+                              onTap: () async {
+                                await _audioPlayer.stop();
+                                if (!mounted) return;
+                                setState(() {
+                                  _reviewMode = false;
+                                  _playing = false;
+                                  _audioLoading = false;
+                                  _currentAudioUrl = null;
+                                  _reviewLoadingAudioUrl = null;
+                                });
+                              },
+                            ),
+                            SizedBox(width: 10 * uiScale),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    context.tr('reviewWordsToday'),
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: (18 * uiScale).clamp(16.0, 22.0),
+                                    ),
+                                  ),
+                                  SizedBox(height: 3 * uiScale),
+                                  Text(
+                                    context.tr('reviewWordsHint'),
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: .92),
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: (11.5 * uiScale).clamp(10.5, 14.0),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 11 * uiScale,
+                                vertical: 7 * uiScale,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: .20),
+                                borderRadius: BorderRadius.circular(99),
+                              ),
+                              child: Text(
+                                '${plan.words.length}/${plan.words.length}',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: (12 * uiScale).clamp(11.0, 14.0),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 12 * uiScale),
+                      Expanded(
+                        child: ListView.separated(
+                          physics: const BouncingScrollPhysics(),
+                          padding: EdgeInsets.symmetric(vertical: 2 * uiScale),
+                          itemCount: plan.words.length,
+                          separatorBuilder: (_, __) =>
+                              SizedBox(height: 9 * uiScale),
+                          itemBuilder: (context, index) {
+                            final word = plan.words[index];
+                            final audioUrl =
+                                word.audioFor(widget.language)?.trim();
+                            return _ReviewWordCard(
+                              word: word,
+                              number: index + 1,
+                              translation:
+                                  word.translationFor(widget.language),
+                              transcription:
+                                  word.transcriptionFor(widget.language)?.trim(),
+                              uiScale: uiScale,
+                              loading: audioUrl != null &&
+                                  audioUrl.isNotEmpty &&
+                                  _audioLoading &&
+                                  _reviewLoadingAudioUrl == audioUrl,
+                              playing: audioUrl != null &&
+                                  audioUrl.isNotEmpty &&
+                                  _playing &&
+                                  _currentAudioUrl == audioUrl,
+                              enabled: audioUrl != null && audioUrl.isNotEmpty,
+                              onTap: () => _playReviewWord(word),
+                            );
+                          },
+                        ),
+                      ),
+                      SizedBox(height: 10 * uiScale),
+                      _NextButton(
+                        uiScale: uiScale,
+                        enabled: true,
+                        isLast: true,
+                        onTap: () async {
+                          await _audioPlayer.stop();
+                          if (context.mounted) {
+                            Navigator.of(context).pop(true);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: ZenviaLoadingScreen());
     }
 
     final plan = _plan;
@@ -272,7 +571,7 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text('🌟', style: TextStyle(fontSize: 52)),
+                      Image.asset('assets/images/correct_star.webp', width: 82, height: 82, fit: BoxFit.contain),
                       const SizedBox(height: 10),
                       Text(
                         context.tr('allWordsOpened'),
@@ -292,6 +591,10 @@ class _DailyWordsLessonScreenState extends State<DailyWordsLessonScreen> {
           ],
         ),
       );
+    }
+
+    if (_reviewMode && plan.words.isNotEmpty) {
+      return _buildReviewScreen(plan);
     }
 
     final word = plan.words[_index];
@@ -694,6 +997,151 @@ class _WordCard extends StatelessWidget {
   }
 }
 
+class _ReviewWordCard extends StatelessWidget {
+  final WordItem word;
+  final int number;
+  final String translation;
+  final String? transcription;
+  final double uiScale;
+  final bool loading;
+  final bool playing;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _ReviewWordCard({
+    required this.word,
+    required this.number,
+    required this.translation,
+    required this.transcription,
+    required this.uiScale,
+    required this.loading,
+    required this.playing,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: .96),
+      borderRadius: BorderRadius.circular(24 * uiScale),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(24 * uiScale),
+        child: Container(
+          padding: EdgeInsets.all(10 * uiScale),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24 * uiScale),
+            border: Border.all(
+              color: const Color(0xFF8DD7FA).withValues(alpha: .55),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF155B91).withValues(alpha: .10),
+                blurRadius: 12,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 34 * uiScale,
+                height: 34 * uiScale,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFFD54A),
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '$number',
+                  style: TextStyle(
+                    color: const Color(0xFF173B75),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14 * uiScale,
+                  ),
+                ),
+              ),
+              SizedBox(width: 9 * uiScale),
+              Container(
+                width: 72 * uiScale,
+                height: 72 * uiScale,
+                padding: EdgeInsets.all(5 * uiScale),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF6F8FB),
+                  borderRadius: BorderRadius.circular(18 * uiScale),
+                ),
+                child: _WordImage(word: word),
+              ),
+              SizedBox(width: 12 * uiScale),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      translation,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: const Color(0xFF163E80),
+                        fontWeight: FontWeight.w900,
+                        fontSize: (20 * uiScale).clamp(17.0, 24.0),
+                      ),
+                    ),
+                    if (transcription != null && transcription!.isNotEmpty) ...[
+                      SizedBox(height: 4 * uiScale),
+                      Text(
+                        transcription!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(0xFF667998),
+                          fontWeight: FontWeight.w700,
+                          fontSize: (12 * uiScale).clamp(11.0, 14.0),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              SizedBox(width: 8 * uiScale),
+              Container(
+                width: 46 * uiScale,
+                height: 46 * uiScale,
+                decoration: BoxDecoration(
+                  color: enabled
+                      ? const Color(0xFF12A8EA)
+                      : const Color(0xFFCBD6DE),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: loading
+                      ? SizedBox(
+                          width: 20 * uiScale,
+                          height: 20 * uiScale,
+                          child: const CircularProgressIndicator(
+                            strokeWidth: 2.3,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Icon(
+                          playing
+                              ? Icons.stop_rounded
+                              : Icons.volume_up_rounded,
+                          color: Colors.white,
+                          size: 25 * uiScale,
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _WordImage extends StatelessWidget {
   final WordItem word;
   const _WordImage({required this.word});
@@ -702,14 +1150,14 @@ class _WordImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = word.imageUrl?.trim();
     if (url == null || url.isEmpty) {
-      return Center(child: Text(word.emoji, style: const TextStyle(fontSize: 120)));
+      return Center(child: Image.asset('assets/images/ui/picture.webp', width: 132, height: 132, fit: BoxFit.contain));
     }
     return Image.network(
       url,
       fit: BoxFit.contain,
       gaplessPlayback: true,
       errorBuilder: (_, __, ___) => Center(
-        child: Text(word.emoji, style: const TextStyle(fontSize: 110)),
+        child: Image.asset('assets/images/ui/picture.webp', width: 122, height: 122, fit: BoxFit.contain),
       ),
     );
   }

@@ -9,6 +9,7 @@ import '../data/parent_repository.dart';
 import '../models/subscription.dart';
 import '../l10n/app_strings.dart';
 import '../theme/app_colors.dart';
+import '../widgets/magic_ui.dart';
 
 const bool _fakePaymentsEnabled = bool.fromEnvironment(
   'FAKE_PAYMENTS',
@@ -78,7 +79,10 @@ class _TariffsScreenState extends State<TariffsScreen> {
     );
   }
 
-  Future<void> _loadGoogleProducts(List<TariffPlan> tariffs) async {
+  Future<void> _loadGoogleProducts(
+    List<TariffPlan> tariffs, {
+    bool merge = false,
+  }) async {
     _googleStoreError = null;
     _googleNotFoundIds = const <String>{};
 
@@ -111,9 +115,13 @@ class _TariffsScreenState extends State<TariffsScreen> {
       debugPrint('[Billing] Querying products: ${productIds.join(', ')}');
       final response =
           await InAppPurchase.instance.queryProductDetails(productIds);
-      final products = <int, ProductDetails>{};
-      final prices = <int, String>{};
-      _googleNotFoundIds = response.notFoundIDs.toSet();
+      final products = merge
+          ? <int, ProductDetails>{..._googleProducts}
+          : <int, ProductDetails>{};
+      final prices = merge ? <int, String>{..._googlePrices} : <int, String>{};
+      _googleNotFoundIds = merge
+          ? <String>{..._googleNotFoundIds, ...response.notFoundIDs}
+          : response.notFoundIDs.toSet();
 
       final responseError = response.error;
       if (responseError != null) {
@@ -132,7 +140,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
         GooglePlayProductDetails? preferred;
 
         for (final details in response.productDetails) {
-          if (details.id != plan.googleProductId ||
+          if (details.id.trim() != plan.googleProductId.trim() ||
               details is! GooglePlayProductDetails) {
             continue;
           }
@@ -154,7 +162,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
             '[Billing] ${details.id}: basePlan=${offer.basePlanId}, '
             'offer=${offer.offerId ?? '<base-plan>'}, price=${details.price}',
           );
-          if (offer.basePlanId != plan.googleBasePlanId) continue;
+          if (offer.basePlanId.trim() != plan.googleBasePlanId.trim()) continue;
 
           fallback ??= details;
           // Prefer the regular base-plan offer. If Google returns only an
@@ -185,9 +193,11 @@ class _TariffsScreenState extends State<TariffsScreen> {
       _googleProducts = products;
       _googlePrices = prices;
     } catch (error, stackTrace) {
-      _googleStoreAvailable = false;
-      _googleProducts = const {};
-      _googlePrices = const {};
+      if (!merge) {
+        _googleStoreAvailable = false;
+        _googleProducts = const {};
+        _googlePrices = const {};
+      }
       _googleStoreError = error.toString();
       debugPrint('[Billing] Failed to load products: $error');
       debugPrintStack(stackTrace: stackTrace);
@@ -206,7 +216,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
       return context.tr('googlePlayStoreUnavailable');
     }
     if (_googleProducts[plan.id] != null) return null;
-    if (_googleNotFoundIds.contains(plan.googleProductId)) {
+    if (_googleNotFoundIds.contains(plan.googleProductId.trim())) {
       return context.tr(
         'googlePlayProductNotFound',
         {'product': plan.googleProductId},
@@ -314,8 +324,17 @@ class _TariffsScreenState extends State<TariffsScreen> {
       }
 
       try {
-        final subscription =
-            await widget.repository.verifyGooglePlayPurchase(token);
+        String? promoCode;
+        final activePromo = _promoOffer;
+        if (activePromo != null &&
+            activePromo.tariff.googleProductId.trim() == purchase.productID.trim()) {
+          promoCode = activePromo.code.trim();
+        }
+
+        final subscription = await widget.repository.verifyGooglePlayPurchase(
+          token,
+          promoCode: promoCode,
+        );
         if (purchase.pendingCompletePurchase) {
           try {
             await InAppPurchase.instance.completePurchase(purchase);
@@ -380,6 +399,15 @@ class _TariffsScreenState extends State<TariffsScreen> {
     setState(() => _validatingPromo = true);
     try {
       final offer = await widget.repository.validatePromoCode(code);
+
+      // Hidden kindergarten tariffs are not part of the initial public tariff
+      // list, so their Google Play ProductDetails are not loaded on screen open.
+      // Load the validated promo tariff explicitly and merge it with the
+      // already loaded public products (for example zenvia_family/monthly).
+      if (!_fakePaymentsEnabled && Platform.isAndroid) {
+        await _loadGoogleProducts([offer.tariff], merge: true);
+      }
+
       if (!mounted) return;
       setState(() {
         _promoOffer = offer;
@@ -945,7 +973,7 @@ class _TariffsScreenState extends State<TariffsScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const ZenviaLoadingScreen();
           }
           if (snapshot.hasError) {
             return Center(child: Text(snapshot.error.toString()));

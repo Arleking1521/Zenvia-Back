@@ -4,6 +4,7 @@ import '../data/app_repository.dart';
 import '../models/dragon_evolution.dart';
 import '../l10n/app_strings.dart';
 import '../theme/app_colors.dart';
+import '../widgets/magic_ui.dart';
 
 class DragonEvolutionScreen extends StatefulWidget {
   final AppRepository repository;
@@ -23,11 +24,22 @@ class _DragonEvolutionScreenState extends State<DragonEvolutionScreen> {
   @override
   void initState() {
     super.initState();
-    _future = widget.repository.getDragonEvolution();
+    _future = _loadData();
+  }
+
+  Future<DragonEvolutionData> _loadData() async {
+    final data = await widget.repository.getDragonEvolution();
+    if (mounted) {
+      await precacheBackendImages(
+        context,
+        data.levels.map((level) => level.iconUrl),
+      );
+    }
+    return data;
   }
 
   Future<void> _reload() async {
-    setState(() => _future = widget.repository.getDragonEvolution());
+    setState(() => _future = _loadData());
     await _future;
   }
 
@@ -39,13 +51,7 @@ class _DragonEvolutionScreenState extends State<DragonEvolutionScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const _Background(
-              child: SafeArea(
-                child: Center(
-                  child: CircularProgressIndicator(color: Colors.white),
-                ),
-              ),
-            );
+            return const ZenviaLoadingScreen();
           }
 
           if (snapshot.hasError || !snapshot.hasData) {
@@ -187,7 +193,7 @@ class _EvolutionBody extends StatelessWidget {
                         children: [
                           Positioned(
                             top: 0,
-                            right: 0,
+                            right: -16,
                             child: _SpeechBubble(
                               text: data.isMaxLevel
                                   ? context.tr('maxLevelReached')
@@ -228,75 +234,57 @@ class _LevelTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(minWidth: 210),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 11),
+      constraints: const BoxConstraints(
+        minWidth: 190,
+        maxWidth: 310,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            const Color(0xFF176FD1).withValues(alpha: .94),
-            const Color(0xFF0E4E9C).withValues(alpha: .94),
+            Colors.white.withValues(alpha: .68),
+            const Color(0xFFDDF5FF).withValues(alpha: .48),
           ],
         ),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: Colors.white.withValues(alpha: .95),
-          width: 2.2,
+          color: Colors.white.withValues(alpha: .82),
+          width: 1.8,
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF073A78).withValues(alpha: .35),
+            color: AppColors.deepBlue.withValues(alpha: .18),
             blurRadius: 14,
             offset: const Offset(0, 5),
           ),
           BoxShadow(
-            color: const Color(0xFFFFD54F).withValues(alpha: .22),
-            blurRadius: 16,
+            color: Colors.white.withValues(alpha: .24),
+            blurRadius: 7,
             spreadRadius: 1,
           ),
         ],
       ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 34,
-              height: 1.0,
-              fontWeight: FontWeight.w900,
-              letterSpacing: .3,
-              foreground: Paint()
-                ..style = PaintingStyle.stroke
-                ..strokeWidth = 5
-                ..strokeJoin = StrokeJoin.round
-                ..color = const Color(0xFF783B00),
+      child: Text(
+        title,
+        textAlign: TextAlign.center,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: AppColors.deepBlue,
+          fontSize: 28,
+          height: 1.02,
+          fontWeight: FontWeight.w900,
+          letterSpacing: .2,
+          shadows: [
+            Shadow(
+              color: Color(0x99FFFFFF),
+              blurRadius: 5,
+              offset: Offset(0, 1),
             ),
-          ),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Color(0xFFFFD54F),
-              fontSize: 34,
-              height: 1.0,
-              fontWeight: FontWeight.w900,
-              letterSpacing: .3,
-              shadows: [
-                Shadow(
-                  color: Color(0xFFFFF2A3),
-                  blurRadius: 7,
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -329,12 +317,6 @@ class _TopBar extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        const Icon(
-          Icons.auto_awesome_rounded,
-          color: Colors.white,
-          size: 24,
-          shadows: [Shadow(color: Color(0x770E3B7D), blurRadius: 8)],
-        ),
       ],
     );
   }
@@ -609,50 +591,36 @@ class _SpeechBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          width: 128,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: .96),
-            borderRadius: BorderRadius.circular(30),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.deepBlue.withValues(alpha: .12),
-                blurRadius: 12,
-                offset: const Offset(0, 5),
-              ),
-            ],
+    return SizedBox(
+      width: 164,
+      height: 93,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/images/dragon_speech_bubble.webp',
+            fit: BoxFit.fill,
+            filterQuality: FilterQuality.high,
           ),
-          child: Text(
-            text,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: AppColors.deepBlue,
-              fontSize: 16,
-              height: 1.05,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-        Positioned(
-          left: 18,
-          bottom: -11,
-          child: Transform.rotate(
-            angle: .55,
-            child: Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: .96),
-                borderRadius: BorderRadius.circular(5),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(21, 16, 18, 26),
+            child: Center(
+              child: Text(
+                text,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.deepBlue,
+                  fontSize: 14,
+                  height: 1.05,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

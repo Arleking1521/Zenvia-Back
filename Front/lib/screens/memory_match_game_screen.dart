@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../widgets/magic_ui.dart';
 
 import '../l10n/app_strings.dart';
 
@@ -12,20 +15,34 @@ class MemoryMatchGameScreen extends StatefulWidget {
 }
 
 class _MemoryMatchGameScreenState extends State<MemoryMatchGameScreen> {
-  static const List<_MemorySymbol> _symbolPool = [
-    _MemorySymbol('🐼', Color(0xFFFFE8A3)),
-    _MemorySymbol('🦊', Color(0xFFFFC6A9)),
-    _MemorySymbol('🐸', Color(0xFFCFF2B4)),
-    _MemorySymbol('🐳', Color(0xFFBFE7FF)),
-    _MemorySymbol('🐙', Color(0xFFE1C9FF)),
-    _MemorySymbol('🦄', Color(0xFFFFD2EA)),
-    _MemorySymbol('🐯', Color(0xFFFFD19B)),
-    _MemorySymbol('🐨', Color(0xFFD9E0EA)),
-    _MemorySymbol('🦋', Color(0xFFC8D7FF)),
-    _MemorySymbol('🐢', Color(0xFFC9EDC6)),
+  static const String _memoryAssetsPrefix =
+      'assets/images/games/find_pair/';
+
+  static const Set<String> _supportedImageExtensions = <String>{
+    '.png',
+    '.webp',
+    '.jpg',
+    '.jpeg',
+  };
+
+  static const List<Color> _cardBackgrounds = <Color>[
+    Color(0xFFFFE8A3),
+    Color(0xFFBFE7FF),
+    Color(0xFFFFD2EA),
+    Color(0xFFCFF2B4),
+    Color(0xFFE1C9FF),
+    Color(0xFFFFC6A9),
+    Color(0xFFFFD19B),
+    Color(0xFFD9E0EA),
+    Color(0xFFC8D7FF),
+    Color(0xFFC9EDC6),
   ];
 
   final math.Random _random = math.Random();
+
+  List<String> _memoryAssets = <String>[];
+  bool _loadingMemoryAssets = true;
+  String? _memoryAssetsError;
 
   _MemoryDifficulty? _difficulty;
   List<_MemoryCardData> _cards = <_MemoryCardData>[];
@@ -36,7 +53,55 @@ class _MemoryMatchGameScreenState extends State<MemoryMatchGameScreen> {
 
   int get _pairCount => _difficulty?.pairCount ?? 0;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadMemoryAssets();
+  }
+
+  Future<void> _loadMemoryAssets() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final assets = manifest
+          .listAssets()
+          .where((asset) => asset.startsWith(_memoryAssetsPrefix))
+          .where((asset) {
+            final lower = asset.toLowerCase();
+            return _supportedImageExtensions.any(lower.endsWith);
+          })
+          .toList()
+        ..sort();
+
+      if (!mounted) return;
+      setState(() {
+        _memoryAssets = assets;
+        _loadingMemoryAssets = false;
+        _memoryAssetsError = assets.isEmpty
+            ? 'Добавьте картинки в assets/images/games/find_pair/.'
+            : null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMemoryAssets = false;
+        _memoryAssetsError = 'Не удалось загрузить картинки игры.';
+      });
+    }
+  }
+
   void _selectDifficulty(_MemoryDifficulty difficulty) {
+    if (_memoryAssets.length < difficulty.pairCount) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Для уровня ${difficulty.fieldLabel} нужно минимум '
+            '${difficulty.pairCount} разных картинок. Сейчас: ${_memoryAssets.length}.',
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _difficulty = difficulty;
       _createRound();
@@ -49,8 +114,16 @@ class _MemoryMatchGameScreenState extends State<MemoryMatchGameScreen> {
 
     _roundToken += 1;
 
-    final symbols = List<_MemorySymbol>.from(_symbolPool)..shuffle(_random);
-    final selected = symbols.take(difficulty.pairCount).toList();
+    final assets = List<String>.from(_memoryAssets)..shuffle(_random);
+    final selectedAssets = assets.take(difficulty.pairCount).toList();
+    final backgrounds = List<Color>.from(_cardBackgrounds)..shuffle(_random);
+    final selected = <_MemorySymbol>[
+      for (var index = 0; index < selectedAssets.length; index++)
+        _MemorySymbol(
+          selectedAssets[index],
+          backgrounds[index % backgrounds.length],
+        ),
+    ];
 
     final cards = <_MemoryCardData>[];
     var id = 0;
@@ -165,9 +238,11 @@ class _MemoryMatchGameScreenState extends State<MemoryMatchGameScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                '🎉',
-                style: TextStyle(fontSize: 60),
+              Image.asset(
+                'assets/images/ui/celebration.webp',
+                width: 78,
+                height: 78,
+                fit: BoxFit.contain,
               ),
               const SizedBox(height: 4),
               Text(
@@ -259,6 +334,70 @@ class _MemoryMatchGameScreenState extends State<MemoryMatchGameScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingMemoryAssets) {
+      return const Scaffold(body: ZenviaLoadingScreen());
+    }
+
+    if (_memoryAssetsError != null) {
+      return Scaffold(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            const Image(
+              image: AssetImage('assets/images/adventure_bg.webp'),
+              fit: BoxFit.cover,
+            ),
+            SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Container(
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: .94),
+                      borderRadius: BorderRadius.circular(26),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.image_not_supported_rounded,
+                          size: 48,
+                          color: Color(0xFF2169A8),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _memoryAssetsError!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFF274B73),
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _loadingMemoryAssets = true;
+                              _memoryAssetsError = null;
+                            });
+                            _loadMemoryAssets();
+                          },
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Повторить'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final difficulty = _difficulty;
 
     return Scaffold(
@@ -491,7 +630,7 @@ class _RoundHeaderButton extends StatelessWidget {
       shape: const CircleBorder(),
       child: IconButton(
         tooltip: tooltip,
-        onPressed: onPressed,
+        onPressed: onPressed == null ? null : () => DebouncedTapGuard.run('memory-header:$tooltip', onPressed!),
         icon: Icon(
           icon,
           color: Colors.white,
@@ -789,97 +928,108 @@ class _FlipMemoryCardState extends State<_FlipMemoryCard>
   }
 
   Widget _front() {
-    final radius = widget.compact ? 18.0 : 26.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final minSide = math.min(constraints.maxWidth, constraints.maxHeight);
+        final radius = (minSide * .14).clamp(16.0, 26.0).toDouble();
+        final imagePadding = (minSide * .075).clamp(6.0, 14.0).toDouble();
+        final starSize = (minSide * .15).clamp(14.0, 26.0).toDouble();
+        final starInset = (minSide * .045).clamp(4.0, 10.0).toDouble();
 
-    return Container(
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: widget.symbol.background,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(
-          color: widget.isMatched
-              ? const Color(0xFF58BE70)
-              : Colors.white,
-          width: widget.isMatched ? 4 : 3,
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x2A000000),
-            blurRadius: 12,
-            offset: Offset(0, 6),
+        return Container(
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: widget.symbol.background,
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(
+              color: widget.isMatched
+                  ? const Color(0xFF58BE70)
+                  : Colors.white,
+              width: widget.isMatched ? 4 : 3,
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x2A000000),
+                blurRadius: 12,
+                offset: Offset(0, 6),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Center(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Padding(
-                padding: EdgeInsets.all(widget.compact ? 6 : 10),
-                child: Text(
-                  widget.symbol.emoji,
-                  style: TextStyle(
-                    fontSize: widget.compact ? 50 : 72,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Padding(
+                  padding: EdgeInsets.all(imagePadding),
+                  child: Image.asset(
+                    widget.symbol.asset,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    filterQuality: FilterQuality.high,
                   ),
                 ),
               ),
-            ),
-          ),
-          if (widget.isMatched)
-            Positioned(
-              right: widget.compact ? 5 : 10,
-              top: widget.compact ? 4 : 8,
-              child: Text(
-                '⭐',
-                style: TextStyle(
-                  fontSize: widget.compact ? 15 : 22,
+              if (widget.isMatched)
+                Positioned(
+                  right: starInset,
+                  top: starInset,
+                  child: Image.asset(
+                    'assets/images/correct_star.webp',
+                    width: starSize,
+                    height: starSize,
+                    fit: BoxFit.contain,
+                  ),
                 ),
-              ),
-            ),
-        ],
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _back() {
-    final radius = widget.compact ? 18.0 : 26.0;
-    final iconSize = widget.compact ? 29.0 : 42.0;
-    final circleSize = widget.compact ? 46.0 : 64.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final minSide = math.min(constraints.maxWidth, constraints.maxHeight);
+        final radius = (minSide * .14).clamp(16.0, 26.0).toDouble();
+        final circleSize = (minSide * .36).clamp(38.0, 64.0).toDouble();
+        final iconSize = (circleSize * .64).clamp(24.0, 42.0).toDouble();
 
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF68BDF8),
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(
-          color: Colors.white,
-          width: widget.compact ? 2.5 : 3,
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x2A000000),
-            blurRadius: 12,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Center(
-        child: Container(
-          width: circleSize,
-          height: circleSize,
+        return Container(
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: .22),
-            shape: BoxShape.circle,
+            color: const Color(0xFF68BDF8),
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(
+              color: Colors.white,
+              width: minSide < 110 ? 2.5 : 3,
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x2A000000),
+                blurRadius: 12,
+                offset: Offset(0, 6),
+              ),
+            ],
           ),
-          child: Icon(
-            Icons.question_mark_rounded,
-            size: iconSize,
-            color: Colors.white,
+          child: Center(
+            child: Container(
+              width: circleSize,
+              height: circleSize,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: .22),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.question_mark_rounded,
+                size: iconSize,
+                color: Colors.white,
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
+
 }
 
 enum _MemoryDifficulty {
@@ -955,8 +1105,8 @@ class _MemoryCardData {
 }
 
 class _MemorySymbol {
-  final String emoji;
+  final String asset;
   final Color background;
 
-  const _MemorySymbol(this.emoji, this.background);
+  const _MemorySymbol(this.asset, this.background);
 }

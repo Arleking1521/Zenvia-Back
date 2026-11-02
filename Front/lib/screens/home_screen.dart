@@ -32,6 +32,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late Future<List<LanguageOption>> _languagesFuture;
   AppLanguage _selectedLanguage = AppLanguage.english;
+  bool _languageSelectionInProgress = false;
   String? _levelDragonUrl;
 
   @override
@@ -51,6 +52,17 @@ class _HomeScreenState extends State<HomeScreen> {
       // Если картинку уровня временно не удалось получить,
       // ниже останется локальный fallback-дракончик.
     }
+
+    // Не показываем готовую страницу, пока изображения, пришедшие с backend,
+    // не окажутся в Flutter image cache. Иначе локальный фон появляется сразу,
+    // а иконки языков/дракон заметно дорисовываются уже после открытия экрана.
+    await precacheBackendImages(
+      context,
+      <String?>[
+        dragonUrl,
+        ...languages.map((language) => language.iconUrl),
+      ],
+    );
 
     if (mounted) {
       setState(() {
@@ -75,6 +87,8 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final url = await widget.repository.getLevelDragonUrl();
       if (!mounted) return;
+      await precacheBackendImages(context, <String?>[url]);
+      if (!mounted) return;
       setState(() => _levelDragonUrl = url);
     } catch (_) {
       // Сохраняем уже показанное изображение при временной ошибке сети.
@@ -82,6 +96,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _selectLanguage(LanguageOption option) async {
+    if (_languageSelectionInProgress) return;
+    _languageSelectionInProgress = true;
     final language = option.appLanguage;
     if (language == null) {
       if (!mounted) return;
@@ -92,6 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
+      _languageSelectionInProgress = false;
       return;
     }
 
@@ -110,13 +127,16 @@ class _HomeScreenState extends State<HomeScreen> {
       // Callback вызывается и при повторном выборе того же языка.
       widget.onLanguageChanged?.call();
     } catch (_) {
-      if (!mounted) return;
-      if (language != previousLanguage) {
+      if (mounted && language != previousLanguage) {
         setState(() => _selectedLanguage = previousLanguage);
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.tr('languageChangeFailed'))),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('languageChangeFailed'))),
+        );
+      }
+    } finally {
+      _languageSelectionInProgress = false;
     }
   }
 
@@ -130,12 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
       future: _languagesFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const ColoredBox(
-            color: Color(0xFF7ED8F4),
-            child: Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            ),
-          );
+          return const ZenviaLoadingScreen();
         }
 
         if (snapshot.hasError) {
@@ -600,7 +615,7 @@ class _LanguageIcon extends StatelessWidget {
       child: url == null || url.isEmpty
           ? Center(
               child: Text(
-                language.appLanguage?.flagEmoji ?? '🌐',
+                language.appLanguage?.flagEmoji ?? '•',
                 style: TextStyle(fontSize: size * .58),
               ),
             )
@@ -609,7 +624,7 @@ class _LanguageIcon extends StatelessWidget {
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => Center(
                 child: Text(
-                  language.appLanguage?.flagEmoji ?? '🌐',
+                  language.appLanguage?.flagEmoji ?? '•',
                   style: TextStyle(fontSize: size * .58),
                 ),
               ),
@@ -671,7 +686,7 @@ class _ApiErrorState extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('☁️', style: TextStyle(fontSize: 46)),
+                    Image.asset('assets/images/cloud_cute.webp', width: 60, height: 60, fit: BoxFit.contain),
                     const SizedBox(height: 10),
                     Text(
                       context.tr('loadLanguagesFailed'),

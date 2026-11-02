@@ -15,7 +15,7 @@ class WordItem {
     this.audioUrls = const {},
     this.transcriptions = const {},
     this.imageUrl,
-    this.emoji = '🖼️',
+    this.emoji = '',
   });
 
   String translationFor(AppLanguage lang) => translations[lang] ?? '';
@@ -35,6 +35,7 @@ class Topic {
   final Color color;
   final List<WordItem> words;
   final int learnedCount;
+  final Set<String> learnedWordIds;
 
   const Topic({
     required this.id,
@@ -46,9 +47,14 @@ class Topic {
     required this.color,
     required this.words,
     required this.learnedCount,
+    this.learnedWordIds = const <String>{},
   });
 
   int get totalCount => words.length;
+  List<WordItem> get learnedWords => words
+      .where((word) => learnedWordIds.contains(word.id))
+      .toList(growable: false);
+  bool isWordLearned(WordItem word) => learnedWordIds.contains(word.id);
   double get progress => totalCount == 0 ? 0 : learnedCount / totalCount;
   bool get isCompleted => totalCount > 0 && learnedCount >= totalCount;
 }

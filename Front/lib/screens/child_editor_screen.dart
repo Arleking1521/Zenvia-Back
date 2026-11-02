@@ -6,6 +6,7 @@ import '../models/child_profile.dart';
 import '../models/registration_option.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_text_field.dart';
+import '../widgets/magic_ui.dart';
 
 class ChildEditorScreen extends StatefulWidget {
   final ParentRepository repository;
@@ -47,6 +48,15 @@ class _ChildEditorScreenState extends State<ChildEditorScreen> {
     _avatars = data[1] as List<AvatarOption>;
     _languageId ??= _languages.isNotEmpty ? _languages.first.id : null;
     _avatarId ??= _avatars.isNotEmpty ? _avatars.first.id : null;
+    if (mounted) {
+      await precacheBackendImages(
+        context,
+        <String?>[
+          ..._avatars.map((avatar) => avatar.imageUrl),
+          ..._languages.map((language) => language.iconUrl),
+        ],
+      );
+    }
   }
 
   @override
@@ -87,19 +97,18 @@ class _ChildEditorScreenState extends State<ChildEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(title: Text(_editing ? context.tr('childProfile') : context.tr('newChildProfile'))),
-      body: FutureBuilder<void>(
-        future: _loadFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text(snapshot.error.toString()));
-          }
-          return ListView(
+    return FutureBuilder<void>(
+      future: _loadFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(body: ZenviaLoadingScreen());
+        }
+        return Scaffold(
+          backgroundColor: AppColors.background,
+          appBar: AppBar(title: Text(_editing ? context.tr('childProfile') : context.tr('newChildProfile'))),
+          body: snapshot.hasError
+              ? Center(child: Text(snapshot.error.toString()))
+              : ListView(
             padding: const EdgeInsets.all(20),
             children: [
               AppTextField(controller: _name, label: context.tr('childName'), hint: 'Карим'),
@@ -147,7 +156,7 @@ class _ChildEditorScreenState extends State<ChildEditorScreen> {
                         ),
                       ),
                       child: avatar.imageUrl == null
-                          ? const Center(child: Text('🙂', style: TextStyle(fontSize: 32)))
+                          ? Center(child: Image.asset('assets/images/dragon_hero.webp', width: 48, height: 48, fit: BoxFit.contain))
                           : ClipRRect(
                               borderRadius: BorderRadius.circular(13),
                               child: Image.network(avatar.imageUrl!, fit: BoxFit.cover),
@@ -170,19 +179,19 @@ class _ChildEditorScreenState extends State<ChildEditorScreen> {
                     : Text(_editing ? context.tr('save') : context.tr('createProfileAction')),
               ),
             ],
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
   String _flag(String code) {
     switch (code) {
-      case 'en': return '🇬🇧';
-      case 'kk': return '🇰🇿';
-      case 'zh': return '🇨🇳';
-      case 'ru': return '🇷🇺';
-      default: return '🌐';
+      case 'en': return 'EN';
+      case 'kk': return 'KZ';
+      case 'zh': return '中';
+      case 'ru': return 'RU';
+      default: return '•';
     }
   }
 }

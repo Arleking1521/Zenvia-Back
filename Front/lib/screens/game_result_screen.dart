@@ -137,17 +137,17 @@ class GameResultScreen extends StatelessWidget {
                                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                 children: [
                                   _ResultMetric(
-                                    icon: '✅',
+                                    asset: 'assets/images/ui/success.webp',
                                     value: '${session.correctCount}',
                                     label: context.tr('correct'),
                                   ),
                                   _ResultMetric(
-                                    icon: '🎯',
+                                    asset: 'assets/images/ui/gamepad.webp',
                                     value: '$accuracy%',
                                     label: context.tr('accuracy'),
                                   ),
                                   _ResultMetric(
-                                    icon: '⭐',
+                                    asset: 'assets/images/reward_star_clean.webp',
                                     value: '+${session.xpEarned}',
                                     label: 'XP',
                                   ),
@@ -282,12 +282,12 @@ class GameResultScreen extends StatelessWidget {
 }
 
 class _ResultMetric extends StatelessWidget {
-  final String icon;
+  final String asset;
   final String value;
   final String label;
 
   const _ResultMetric({
-    required this.icon,
+    required this.asset,
     required this.value,
     required this.label,
   });
@@ -297,7 +297,7 @@ class _ResultMetric extends StatelessWidget {
     return Expanded(
       child: Column(
         children: [
-          Text(icon, style: const TextStyle(fontSize: 24)),
+          Image.asset(asset, width: 30, height: 30, fit: BoxFit.contain),
           const SizedBox(height: 3),
           Text(
             value,

@@ -38,7 +38,9 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
     ),
   );
   final Map<String, Uint8List> _audioCache = <String, Uint8List>{};
+  final Map<String, int> _listenCounts = <String, int>{};
   String? _currentAudioUrl;
+  late Future<void> _imagesFuture;
   int _wordIndex = 0;
   bool _isPlayingAudio = false;
   bool _isLoadingAudio = false;
@@ -49,6 +51,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
   void initState() {
     super.initState();
     BackgroundMusicService.instance.silence(_backgroundMusicToken);
+    _imagesFuture = _preloadImages();
     _playerStateSubscription = _audioPlayer.onPlayerStateChanged.listen((state) {
       if (!mounted) return;
       setState(() => _isPlayingAudio = state == PlayerState.playing);
@@ -61,6 +64,15 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
         _currentAudioUrl = null;
       });
     });
+  }
+
+  Future<void> _preloadImages() async {
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await precacheBackendImages(
+      context,
+      widget.topic.words.map((word) => word.imageUrl),
+    );
   }
 
   @override
@@ -116,10 +128,13 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                   ? 'audio/ogg'
                   : 'audio/mpeg';
       await AudioSettingsService.instance.load();
+      final listenNumber = (_listenCounts[url] ?? 0) + 1;
+      _listenCounts[url] = listenNumber;
       await _audioPlayer.play(
         BytesSource(bytes, mimeType: mimeType),
         volume: AudioSettingsService.instance.voiceVolume,
       );
+      await _audioPlayer.setPlaybackRate(listenNumber.isEven ? 0.72 : 1.0);
       if (mounted) {
         setState(() {
           _currentAudioUrl = url;
@@ -160,25 +175,38 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _imagesFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(body: ZenviaLoadingScreen());
+        }
+        return _buildReady(context);
+      },
+    );
+  }
+
+  Widget _buildReady(BuildContext context) {
     final topic = widget.topic;
-    if (topic.words.isEmpty) {
+    final learnedWords = topic.learnedWords;
+    if (learnedWords.isEmpty) {
       return Scaffold(
         body: FantasyBackground(
           child: SafeArea(
             child: Center(
-              child: MagicCard(child: Text(context.tr('topicNoWordsNamed', {'topic': topic.title}))),
+              child: MagicCard(child: Text(context.tr('dictionaryNoLearnedWords'))),
             ),
           ),
         ),
       );
     }
 
-    final word = topic.words[_wordIndex];
+    final word = learnedWords[_wordIndex];
     final transcription = word.transcriptionFor(widget.language);
     final audioUrl = word.audioFor(widget.language);
     final hasAudio = audioUrl != null && audioUrl.trim().isNotEmpty;
-    final progress = (_wordIndex + 1) / topic.words.length;
-    final remaining = topic.words.length - (_wordIndex + 1);
+    final progress = (_wordIndex + 1) / learnedWords.length;
+    final remaining = learnedWords.length - (_wordIndex + 1);
 
     return Scaffold(
       body: FantasyBackground(
@@ -208,13 +236,13 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            context.tr('lessonStep', {'current': _wordIndex + 1, 'total': topic.words.length}),
+                            context.tr('lessonStep', {'current': _wordIndex + 1, 'total': learnedWords.length}),
                             style: const TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w700),
                           ),
                         ],
                       ),
                     ),
-                    _smallBadge(text: '${(_wordIndex + 1)}/${topic.words.length}', icon: Icons.auto_awesome_rounded),
+                    _smallBadge(text: '${(_wordIndex + 1)}/${learnedWords.length}', icon: Icons.auto_awesome_rounded),
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -330,7 +358,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                               children: [
                                 Expanded(
                                   child: Center(
-                                    child: _WordImage(imageUrl: word.imageUrl, fallbackEmoji: word.emoji),
+                                    child: _WordImage(imageUrl: word.imageUrl),
                                   ),
                                 ),
                                 const SizedBox(height: 8),
@@ -366,7 +394,7 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                                     borderRadius: BorderRadius.circular(99),
                                   ),
                                   child: Text(
-                                    _wordIndex == topic.words.length - 1 ? context.tr('almostDoneStar') : context.tr('rememberAndMove'),
+                                    _wordIndex == learnedWords.length - 1 ? context.tr('almostDoneStar') : context.tr('rememberAndMove'),
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
                                       color: AppColors.deepBlue,
@@ -399,10 +427,10 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
                     Expanded(
                       flex: 2,
                       child: MagicPrimaryButton(
-                        label: _wordIndex < topic.words.length - 1 ? context.tr('nextWord') : context.tr('finish'),
-                        icon: _wordIndex < topic.words.length - 1 ? Icons.arrow_forward_rounded : Icons.star_rounded,
+                        label: _wordIndex < learnedWords.length - 1 ? context.tr('nextWord') : context.tr('finish'),
+                        icon: _wordIndex < learnedWords.length - 1 ? Icons.arrow_forward_rounded : Icons.star_rounded,
                         onPressed: () async {
-                          if (_wordIndex < topic.words.length - 1) {
+                          if (_wordIndex < learnedWords.length - 1) {
                             await _changeWord(_wordIndex + 1);
                           } else {
                             await _audioPlayer.stop();
@@ -510,14 +538,13 @@ class _DictionaryScreenState extends State<DictionaryScreen> {
 
 class _WordImage extends StatelessWidget {
   final String? imageUrl;
-  final String fallbackEmoji;
-  const _WordImage({required this.imageUrl, required this.fallbackEmoji});
+  const _WordImage({required this.imageUrl});
 
   @override
   Widget build(BuildContext context) {
     final url = imageUrl;
     if (url == null || url.isEmpty) {
-      return Text(fallbackEmoji, style: const TextStyle(fontSize: 122));
+      return Center(child: Image.asset('assets/images/ui/picture.webp', width: 132, height: 132, fit: BoxFit.contain));
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(26),
@@ -526,7 +553,7 @@ class _WordImage extends StatelessWidget {
         fit: BoxFit.contain,
         width: double.infinity,
         height: double.infinity,
-        errorBuilder: (_, __, ___) => Center(child: Text(fallbackEmoji, style: const TextStyle(fontSize: 108))),
+        errorBuilder: (_, __, ___) => Center(child: Image.asset('assets/images/ui/picture.webp', width: 118, height: 118, fit: BoxFit.contain)),
       ),
     );
   }

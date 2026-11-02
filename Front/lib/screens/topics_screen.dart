@@ -12,6 +12,7 @@ import '../theme/app_colors.dart';
 import 'daily_words_lesson_screen.dart';
 import 'topic_detail_screen.dart';
 import '../services/daily_lesson_service.dart';
+import '../widgets/magic_ui.dart';
 
 class TopicsScreen extends StatefulWidget {
   final AppRepository repository;
@@ -32,6 +33,7 @@ class TopicsScreen extends StatefulWidget {
 class _TopicsScreenState extends State<TopicsScreen> {
   late Future<List<Topic>> _future;
   AppLanguage _language = AppLanguage.english;
+  bool _openingTopic = false;
 
   @override
   void initState() {
@@ -48,11 +50,22 @@ class _TopicsScreenState extends State<TopicsScreen> {
   }
 
   void _reload() {
-    _future = widget.repository.getTopics();
+    _future = _loadTopics();
     widget.repository.getSelectedLanguage().then((language) {
       if (!mounted) return;
       setState(() => _language = language);
     });
+  }
+
+  Future<List<Topic>> _loadTopics() async {
+    final topics = await widget.repository.getTopics();
+    if (mounted) {
+      await precacheBackendImages(
+        context,
+        topics.map((topic) => topic.iconUrl),
+      );
+    }
+    return topics;
   }
 
   bool _isTopicUnlocked(int index, List<Topic> topics) {
@@ -68,6 +81,8 @@ class _TopicsScreenState extends State<TopicsScreen> {
   }
 
   Future<void> _openTopic(Topic topic) async {
+    if (_openingTopic) return;
+    _openingTopic = true;
     final lessonService = DailyLessonService(widget.repository);
     DailyLessonPlan plan;
     try {
@@ -76,14 +91,19 @@ class _TopicsScreenState extends State<TopicsScreen> {
         language: _language,
       );
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+      _openingTopic = false;
       return;
     }
 
-    if (!mounted) return;
+    if (!mounted) {
+      _openingTopic = false;
+      return;
+    }
 
     if (!plan.isComplete && plan.requiredCount > 0) {
       final completed = await Navigator.of(context).push<bool>(
@@ -96,7 +116,10 @@ class _TopicsScreenState extends State<TopicsScreen> {
         ),
       );
 
-      if (!mounted || completed != true) return;
+      if (!mounted || completed != true) {
+        _openingTopic = false;
+        return;
+      }
     }
 
     await Navigator.of(context).push(
@@ -110,6 +133,7 @@ class _TopicsScreenState extends State<TopicsScreen> {
       ),
     );
 
+    _openingTopic = false;
     if (!mounted) return;
     setState(_reload);
   }
@@ -125,82 +149,82 @@ class _TopicsScreenState extends State<TopicsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF35BDF3),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: Image.asset(
-              'assets/images/world_map_sky.webp',
-              fit: BoxFit.cover,
-              alignment: Alignment.topCenter,
+    return FutureBuilder<List<Topic>>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(body: ZenviaLoadingScreen());
+        }
+
+        if (snapshot.hasError) {
+          return Scaffold(
+            backgroundColor: const Color(0xFF35BDF3),
+            body: _ErrorState(
+              onRetry: () => setState(_reload),
             ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    const Color(0xFF008BCB).withValues(alpha: .12),
-                    Colors.transparent,
-                    Colors.white.withValues(alpha: .08),
+          );
+        }
+
+        final topics = snapshot.data ?? const <Topic>[];
+        return Scaffold(
+          backgroundColor: const Color(0xFF35BDF3),
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: Image.asset(
+                  'assets/images/world_map_sky.webp',
+                  fit: BoxFit.cover,
+                  alignment: Alignment.topCenter,
+                ),
+              ),
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        const Color(0xFF008BCB).withValues(alpha: .12),
+                        Colors.transparent,
+                        Colors.white.withValues(alpha: .08),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              SafeArea(
+                bottom: false,
+                child: Column(
+                  children: [
+                    _MapHeader(
+                      onBack: widget.onBack,
+                      onRefresh: () => setState(_reload),
+                    ),
+                    Expanded(
+                      child: topics.isEmpty
+                          ? Center(
+                              child: _GlassMessage(
+                                icon: Icons.cloud_outlined,
+                                text: context.tr('noTopics'),
+                              ),
+                            )
+                          : _WorldMap(
+                              topics: topics,
+                              isUnlocked: (index) => _isTopicUnlocked(index, topics),
+                              onTopicTap: _openTopic,
+                              onLockedTap: _showLockedMessage,
+                            ),
+                    ),
                   ],
                 ),
               ),
-            ),
+            ],
           ),
-          SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                _MapHeader(
-                  onBack: widget.onBack,
-                  onRefresh: () => setState(_reload),
-                ),
-                Expanded(
-                  child: FutureBuilder<List<Topic>>(
-                    future: _future,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState != ConnectionState.done) {
-                        return const Center(
-                          child: CircularProgressIndicator(color: Colors.white),
-                        );
-                      }
-
-                      if (snapshot.hasError) {
-                        return _ErrorState(
-                          onRetry: () => setState(_reload),
-                        );
-                      }
-
-                      final topics = snapshot.data ?? const <Topic>[];
-                      if (topics.isEmpty) {
-                        return Center(
-                          child: _GlassMessage(
-                            icon: Icons.cloud_outlined,
-                            text: context.tr('noTopics'),
-                          ),
-                        );
-                      }
-
-                      return _WorldMap(
-                        topics: topics,
-                        isUnlocked: (index) => _isTopicUnlocked(index, topics),
-                        onTopicTap: _openTopic,
-                        onLockedTap: _showLockedMessage,
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
+
 }
 
 class _MapHeader extends StatelessWidget {

@@ -190,14 +190,14 @@ class _TopicIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = topic.iconUrl;
     if (url == null || url.isEmpty) {
-      return FittedBox(child: Text(topic.emoji, style: const TextStyle(fontSize: 42)));
+      return FittedBox(child: Image.asset('assets/images/ui/picture.webp', width: 48, height: 48, fit: BoxFit.contain));
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(999),
       child: Image.network(
         url,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => FittedBox(child: Text(topic.emoji, style: const TextStyle(fontSize: 42))),
+        errorBuilder: (_, __, ___) => FittedBox(child: Image.asset('assets/images/ui/picture.webp', width: 48, height: 48, fit: BoxFit.contain)),
       ),
     );
   }

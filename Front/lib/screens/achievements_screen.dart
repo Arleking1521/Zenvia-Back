@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../data/app_repository.dart';
@@ -21,55 +23,74 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
   @override
   void initState() {
     super.initState();
-    _future = widget.repository.getAchievements();
+    _future = _loadAchievements();
+  }
+
+  Future<List<Achievement>> _loadAchievements() async {
+    final items = await widget.repository.getAchievements();
+    if (mounted) {
+      await precacheBackendImages(
+        context,
+        items.map((item) => item.iconUrl),
+      );
+    }
+    return items;
   }
 
   @override
   void didUpdateWidget(covariant AchievementsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.repository != widget.repository) {
-      _future = widget.repository.getAchievements();
+      _future = _loadAchievements();
     }
   }
 
   void _reload() => setState(() {
-        _future = widget.repository.getAchievements();
+        _future = _loadAchievements();
       });
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: Image.asset(
-              'assets/images/achievements_screen_bg.png',
-              fit: BoxFit.cover,
-            ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.white.withValues(alpha: .02),
-                    Colors.white.withValues(alpha: .05),
-                    const Color(0xFFF3F6FF).withValues(alpha: .15),
-                  ],
+    return FutureBuilder<List<Achievement>>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(body: ZenviaLoadingScreen());
+        }
+
+        final items = snapshot.data ?? const <Achievement>[];
+        return Scaffold(
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: ImageFiltered(
+                  imageFilter: ui.ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
+                  child: Transform.scale(
+                    scale: 1.02,
+                    child: Image.asset(
+                      'assets/images/achievements_screen_bg.webp',
+                      fit: BoxFit.cover,
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-          SafeArea(
-            child: FutureBuilder<List<Achievement>>(
-              future: _future,
-              builder: (context, snapshot) {
-                final waiting = snapshot.connectionState != ConnectionState.done;
-                final items = snapshot.data ?? const <Achievement>[];
-
-                return Column(
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.white.withValues(alpha: .02),
+                        Colors.white.withValues(alpha: .05),
+                        const Color(0xFFF3F6FF).withValues(alpha: .15),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              SafeArea(
+                child: Column(
                   children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -97,63 +118,56 @@ class _AchievementsScreenState extends State<AchievementsScreen> {
                             ),
                           ),
                           const Spacer(),
-                          _topCircleButton(
-                            icon: Icons.auto_awesome_rounded,
-                            onTap: null,
-                          ),
+                          const SizedBox(width: 42, height: 42),
                         ],
                       ),
                     ),
                     Expanded(
-                      child: waiting
-                          ? const Center(
-                              child: CircularProgressIndicator(color: AppColors.gold),
+                      child: snapshot.hasError
+                          ? Center(
+                              child: MagicPrimaryButton(
+                                label: context.tr('retry'),
+                                onPressed: _reload,
+                              ),
                             )
-                          : snapshot.hasError
+                          : items.isEmpty
                               ? Center(
-                                  child: MagicPrimaryButton(
-                                    label: context.tr('retry'),
-                                    onPressed: _reload,
+                                  child: Text(
+                                    context.tr('noAchievements'),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 18,
+                                    ),
                                   ),
                                 )
-                              : items.isEmpty
-                                  ? Center(
-                                      child: Text(
-                                        context.tr('noAchievements'),
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 18,
-                                        ),
-                                      ),
-                                    )
-                                  : RefreshIndicator(
-                                      color: AppColors.goldDark,
-                                      onRefresh: () async {
-                                        _reload();
-                                        await _future;
-                                      },
-                                      child: ListView(
-                                        physics: const AlwaysScrollableScrollPhysics(),
-                                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 26),
-                                        children: [
-                                          _SummaryCloud(achievements: items),
-                                          const SizedBox(height: 16),
-                                          for (final item in items) ...[
-                                            AchievementCard(achievement: item),
-                                            const SizedBox(height: 14),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
+                              : RefreshIndicator(
+                                  color: AppColors.goldDark,
+                                  onRefresh: () async {
+                                    _reload();
+                                    await _future;
+                                  },
+                                  child: ListView(
+                                    physics: const AlwaysScrollableScrollPhysics(),
+                                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 26),
+                                    children: [
+                                      _SummaryCloud(achievements: items),
+                                      const SizedBox(height: 16),
+                                      for (final item in items) ...[
+                                        AchievementCard(achievement: item),
+                                        const SizedBox(height: 14),
+                                      ],
+                                    ],
+                                  ),
+                                ),
                     ),
                   ],
-                );
-              },
-            ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -191,7 +205,7 @@ class _SummaryCloud extends StatelessWidget {
         children: [
           Positioned.fill(
             child: Image.asset(
-              'assets/images/achievement_cloud_card.png',
+              'assets/images/achievement_cloud_card.webp',
               fit: BoxFit.fill,
             ),
           ),

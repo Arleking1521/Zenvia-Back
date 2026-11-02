@@ -4,6 +4,7 @@ import '../data/legal_repository.dart';
 import '../l10n/app_strings.dart';
 import '../models/legal_document.dart';
 import '../theme/app_colors.dart';
+import '../widgets/magic_ui.dart';
 
 class LegalDocumentScreen extends StatefulWidget {
   final LegalRepository repository;
@@ -309,9 +310,7 @@ class _LegalDocumentScreenState extends State<LegalDocumentScreen> {
         builder: (context, snapshot) {
           if (snapshot.connectionState !=
               ConnectionState.done) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+            return const ZenviaLoadingScreen();
           }
 
           if (snapshot.hasError) {
