@@ -465,7 +465,7 @@ class PromoCodeRedeemView(APIView):
                 parent = User.objects.select_for_update().get(pk=request.user.pk)
                 promo = (
                     PromoCode.objects
-                    .select_for_update()
+                    .select_for_update(of=('self',))
                     .select_related('kindergarten', 'tariff')
                     .get(pk=validated_promo.pk)
                 )
