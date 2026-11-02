@@ -3,7 +3,7 @@ import secrets
 from datetime import timedelta
 from uuid import uuid4
 
-from django.db import transaction
+from django.db import transaction, IntegrityError, DatabaseError
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.mail import send_mail
@@ -444,8 +444,14 @@ class PromoCodeValidateView(APIView):
 class PromoCodeRedeemView(APIView):
     permission_classes = [IsAuthenticated]
 
-    @transaction.atomic
     def post(self, request):
+        """Activate a direct-access promo code safely.
+
+        Validation is intentionally repeated after row locks are acquired so two
+        simultaneous requests can never consume the same one-use code.  The
+        response is serialized only after the transaction has committed; this
+        also avoids reverse OneToOne cache edge-cases around promo_usage.
+        """
         serializer = PromoCodeRedeemSerializer(
             data=request.data,
             context={'request': request},
@@ -453,66 +459,154 @@ class PromoCodeRedeemView(APIView):
         serializer.is_valid(raise_exception=True)
         validated_promo = serializer.validated_data['promo']
 
-        parent = User.objects.select_for_update().get(pk=request.user.pk)
-        promo = (
-            PromoCode.objects
-            .select_for_update()
-            .select_related('kindergarten', 'tariff')
-            .get(pk=validated_promo.pk)
-        )
+        subscription_id = None
+        try:
+            with transaction.atomic():
+                parent = User.objects.select_for_update().get(pk=request.user.pk)
+                promo = (
+                    PromoCode.objects
+                    .select_for_update()
+                    .select_related('kindergarten', 'tariff')
+                    .get(pk=validated_promo.pk)
+                )
 
-        error = promo.unavailability_reason(parent)
-        if error:
-            return Response({'code': [error]}, status=status.HTTP_400_BAD_REQUEST)
-        if promo.mode != PromoCode.MODE_DIRECT_ACCESS:
-            return Response(
-                {'code': ['Этот промокод используется вместе с оплатой через Google Play.']},
-                status=status.HTTP_400_BAD_REQUEST,
+                error = promo.unavailability_reason(parent)
+                if error:
+                    return Response(
+                        {'code': [error]},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if promo.mode != PromoCode.MODE_DIRECT_ACCESS:
+                    return Response(
+                        {
+                            'code': [
+                                'Этот промокод используется вместе с оплатой через Google Play.'
+                            ]
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                active = get_active_subscription(parent)
+                has_pending = parent.subscriptions.filter(
+                    status=Subscription.STATUS_PENDING,
+                ).exists()
+                if active is not None or has_pending:
+                    return Response(
+                        {
+                            'detail': (
+                                'Нельзя активировать код, пока есть активная подписка '
+                                'или подписка, ожидающая оплаты.'
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                tariff = promo.tariff
+                children_count = parent.children.filter(is_active=True).count()
+                if children_count > tariff.max_children:
+                    return Response(
+                        {
+                            'detail': (
+                                f'Тариф поддерживает максимум {tariff.max_children} '
+                                f'профилей детей, а у вас уже создано {children_count}.'
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                access_days = promo.effective_access_days
+                if access_days < 1:
+                    logger.error(
+                        'Direct promo has invalid access_days promo=%s tariff=%s days=%s',
+                        promo.pk,
+                        tariff.pk,
+                        access_days,
+                    )
+                    return Response(
+                        {'detail': 'Для промокода некорректно настроен срок доступа.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                now = timezone.now()
+                subscription = Subscription.objects.create(
+                    parent=parent,
+                    tariff=tariff,
+                    status=Subscription.STATUS_ACTIVE,
+                    starts_at=now,
+                    ends_at=now + timedelta(days=access_days),
+                    auto_renew=False,
+                    payment_provider='promo_code',
+                    external_payment_id=f'promo:{promo.pk}:{parent.pk}',
+                )
+
+                PromoCodeUsage.objects.create(
+                    promo_code=promo,
+                    parent=parent,
+                    subscription=subscription,
+                )
+                subscription_id = subscription.pk
+
+        except IntegrityError:
+            logger.exception(
+                'Direct promo activation integrity error user=%s promo=%s',
+                request.user.pk,
+                validated_promo.pk,
             )
-
-        active = get_active_subscription(parent)
-        has_pending = parent.subscriptions.filter(
-            status=Subscription.STATUS_PENDING,
-        ).exists()
-        if active is not None or has_pending:
             return Response(
                 {
                     'detail': (
-                        'Нельзя активировать код, пока есть активная подписка '
-                        'или подписка, ожидающая оплаты.'
-                    )
+                        'Не удалось активировать промокод из-за конфликта данных. '
+                        'Обновите страницу и попробуйте ещё раз.'
+                    ),
+                    'error_code': 'promo_redeem_integrity',
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_409_CONFLICT,
             )
-
-        tariff = promo.tariff
-        children_count = parent.children.filter(is_active=True).count()
-        if children_count > tariff.max_children:
+        except DatabaseError:
+            logger.exception(
+                'Direct promo activation database error user=%s promo=%s',
+                request.user.pk,
+                validated_promo.pk,
+            )
             return Response(
                 {
-                    'detail': (
-                        f'Тариф поддерживает максимум {tariff.max_children} '
-                        f'профилей детей, а у вас уже создано {children_count}.'
-                    )
+                    'detail': 'Ошибка базы данных при активации промокода.',
+                    'error_code': 'promo_redeem_database',
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        except Exception:
+            logger.exception(
+                'Direct promo activation unexpected error user=%s promo=%s',
+                request.user.pk,
+                validated_promo.pk,
+            )
+            return Response(
+                {
+                    'detail': 'Не удалось активировать промокод.',
+                    'error_code': 'promo_redeem_failed',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        now = timezone.now()
-        subscription = Subscription.objects.create(
-            parent=parent,
-            tariff=tariff,
-            status=Subscription.STATUS_ACTIVE,
-            starts_at=now,
-            ends_at=now + timedelta(days=promo.effective_access_days),
-            auto_renew=False,
-            payment_provider='promo_code',
-            external_payment_id=f'promo:{promo.code}',
+        # Re-query after commit.  Besides making the response independent from
+        # transaction state, select_related guarantees the promo reverse relation
+        # needed by SubscriptionSerializer is loaded from the database.
+        subscription = (
+            Subscription.objects
+            .select_related(
+                'tariff',
+                'promo_usage__promo_code__kindergarten',
+            )
+            .get(pk=subscription_id)
         )
-        PromoCodeUsage.objects.create(
-            promo_code=promo,
-            parent=parent,
-            subscription=subscription,
+
+        logger.info(
+            'Direct promo activated user=%s promo=%s subscription=%s ends_at=%s',
+            request.user.pk,
+            validated_promo.pk,
+            subscription.pk,
+            subscription.ends_at,
         )
 
         return Response(
