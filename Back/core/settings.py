@@ -29,7 +29,13 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = os.getenv('DEBUG')=='True'
 
 # ALLOWED_HOSTS = ['websw.ru', 'www.websw.ru']
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [ 
+    "api.zenvia.kz",
+    "10.20.0.1",
+    "87.199.129.206",
+    "localhost",
+    "127.0.0.1",
+    ]
 
 AUTH_USER_MODEL = 'account.User'
 
@@ -136,15 +142,15 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-FORCE_SCRIPT_NAME = "/zenvia"
-STATIC_URL = '/zenvia/static/'
+# FORCE_SCRIPT_NAME = "/zenvia"
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 # STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'static')
 ]
 
-MEDIA_URL = '/zenvia/media/'
+MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 LOCALE_PATHS = [os.path.join(BASE_DIR, 'locale')]
@@ -258,10 +264,14 @@ SPECTACULAR_SETTINGS = {
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3002',
-    'http://localhost:3003',
+    "https://zenvia.kz",
+    "https://www.zenvia.kz",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://api.zenvia.kz",
+    "https://zenvia.kz",
+    "https://www.zenvia.kz",
 ]
 
 DAILY_XP_LIMIT = int(os.getenv('DAILY_XP_LIMIT', '100'))

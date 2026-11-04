@@ -9,7 +9,7 @@ class ApiConfig {
   ///   --dart-define=API_BASE_URL=https://another.example.com/path/
   static const String _environmentBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://websw.ru/zenvia/',
+    defaultValue: 'https://api.zenvia.kz/',
   );
 
   /// Dio корректнее работает с backend, размещённым в подпапке (/zenvia/),
@@ -19,9 +19,9 @@ class ApiConfig {
       ? _environmentBaseUrl
       : '$_environmentBaseUrl/';
 
-  static const String accountPrefix = 'api/account';
-  static const String apiPrefix = 'api';
-  static const String legalPrefix = 'api/legal';
+  static const String accountPrefix = 'account';
+  static const String apiPrefix = '';
+  static const String legalPrefix = 'legal';
 
   static String account(String path) => _join(accountPrefix, path);
   static String api(String path) => _join(apiPrefix, path);

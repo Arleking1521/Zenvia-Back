@@ -26,17 +26,20 @@ from drf_spectacular.views import (
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/account/',include('account.urls')),
-    path('api/',include('word_learning.urls')),
-    path('api/legal/', include('legal_documents.api_urls')),
+    path('account/',include('account.urls')),
+    path('',include('word_learning.urls')),
+    path('legal/', include('legal_documents.api_urls')),
     path('', include('account.web_urls')),
     path('', include('legal_documents.web_urls')),
-    path('api/schema/',SpectacularAPIView.as_view(),name='schema'),
-    path('api/docs/',SpectacularSwaggerView.as_view(url_name='schema'),name='swagger-ui'),
-    path('api/redoc/',SpectacularRedocView.as_view(url_name='schema'),name='redoc'),
+    
 ]
 
 if settings.DEBUG:
+    urlpatterns+=[
+        path('schema/',SpectacularAPIView.as_view(),name='schema'),
+        path('docs/',SpectacularSwaggerView.as_view(url_name='schema'),name='swagger-ui'),
+        path('redoc/',SpectacularRedocView.as_view(url_name='schema'),name='redoc'),
+    ]
     urlpatterns += static(
         settings.MEDIA_URL,
         document_root=settings.MEDIA_ROOT
