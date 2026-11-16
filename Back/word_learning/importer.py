@@ -14,7 +14,7 @@ from .models import (
 )
 
 IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.webp'}
-AUDIO_EXT = {'.mp3', '.wav', '.ogg', '.m4a'}
+AUDIO_EXT = {'.mp3', '.wav', '.ogg', '.m4a', '.aac'}
 MAX_FILES = 5000
 MAX_UNPACKED = 1024 * 1024 * 1024  # 1 ГБ
 IGNORED = {'.ds_store', 'thumbs.db'}
